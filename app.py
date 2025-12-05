@@ -88,6 +88,8 @@ def init_db():
         CREATE TABLE IF NOT EXISTS konten (
             id INTEGER PRIMARY KEY,
             name TEXT NOT NULL,
+            inhaber TEXT,
+            kartennummer_letzte4 TEXT,
             kartennummer_encrypted TEXT,
             bank TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -425,14 +427,30 @@ def create_konto():
         kartennummer = encrypt(data['kartennummer'])
 
     cursor = conn.execute(
-        'INSERT INTO konten (name, kartennummer_encrypted, bank) VALUES (?, ?, ?)',
-        (data['name'], kartennummer, data.get('bank'))
+        'INSERT INTO konten (name, inhaber, kartennummer_letzte4, kartennummer_encrypted, bank) VALUES (?, ?, ?, ?, ?)',
+        (data['name'], data.get('inhaber'), data.get('kartennummer_letzte4'), kartennummer, data.get('bank'))
     )
     konto_id = cursor.lastrowid
     conn.commit()
     conn.close()
 
     return jsonify({'id': konto_id, 'success': True})
+
+
+@app.route('/api/konten/<int:id>', methods=['PUT'])
+def update_konto(id):
+    """Update credit card account."""
+    data = request.json
+    conn = get_db()
+
+    conn.execute(
+        'UPDATE konten SET inhaber = ?, kartennummer_letzte4 = ? WHERE id = ?',
+        (data.get('inhaber'), data.get('kartennummer_letzte4'), id)
+    )
+    conn.commit()
+    conn.close()
+
+    return jsonify({'success': True})
 
 
 # --- Abrechnungen ---
@@ -469,7 +487,7 @@ def get_abrechnung(id):
     conn = get_db()
 
     abrechnung = conn.execute('''
-        SELECT a.*, k.name as konto_name
+        SELECT a.*, k.name as konto_name, k.inhaber, k.kartennummer_letzte4
         FROM abrechnungen a
         LEFT JOIN konten k ON a.konto_id = k.id
         WHERE a.id = ?
@@ -1338,7 +1356,7 @@ def export_abrechnung(id):
 
     # Get statement
     abrechnung = conn.execute('''
-        SELECT a.*, k.name as konto_name
+        SELECT a.*, k.name as konto_name, k.inhaber, k.kartennummer_letzte4
         FROM abrechnungen a
         LEFT JOIN konten k ON a.konto_id = k.id
         WHERE a.id = ?
@@ -1371,7 +1389,12 @@ def export_abrechnung(id):
 
     # Header
     elements.append(Paragraph(f"Kreditkartenabrechnung", title_style))
-    elements.append(Paragraph(f"{abrechnung['konto_name']} - {abrechnung['periode']}", subtitle_style))
+    karten_info = abrechnung['konto_name']
+    if abrechnung['kartennummer_letzte4']:
+        karten_info += f" (**** {abrechnung['kartennummer_letzte4']})"
+    elements.append(Paragraph(f"{karten_info} - {abrechnung['periode']}", subtitle_style))
+    if abrechnung['inhaber']:
+        elements.append(Paragraph(f"Karteninhaber: {abrechnung['inhaber']}", subtitle_style))
     elements.append(Spacer(1, 10*mm))
 
     # Summary
@@ -1486,7 +1509,7 @@ def export_abrechnung_zip(id):
 
     # Get statement
     abrechnung = conn.execute('''
-        SELECT a.*, k.name as konto_name
+        SELECT a.*, k.name as konto_name, k.inhaber, k.kartennummer_letzte4
         FROM abrechnungen a
         LEFT JOIN konten k ON a.konto_id = k.id
         WHERE a.id = ?
