@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+ENV/
+
+# uv
+.python-version
+uv.lock
+
+# Environment
+.env
+*.key
+secret.key
+
+# Data
+data/
+exports/
+logs/
+belege/archiv/
+belege/inbox/*.pdf
+imports/archiv/
+imports/inbox/*.pdf
+
+# Keep inbox directories
+!belege/inbox/.gitkeep
+!imports/inbox/.gitkeep
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Docker
+*.log
