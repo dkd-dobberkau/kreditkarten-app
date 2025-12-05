@@ -71,13 +71,132 @@ KATEGORIEN = {
 
 
 # =============================================================================
+# Archiv-Funktionen
+# =============================================================================
+
+def get_archiv_path(konto_name, periode):
+    """
+    Erstellt den Archiv-Pfad: belege/archiv/{Konto}/{Periode}/
+    Gibt den Pfad zurück und erstellt das Verzeichnis falls nötig.
+    """
+    konto_clean = (konto_name or 'Unbekannt').replace(' ', '_').replace('/', '-')
+    periode_clean = (periode or 'Unbekannt').replace(' ', '_').replace('/', '-')
+
+    archiv_path = os.path.join(BELEGE_DIR, 'archiv', konto_clean, periode_clean)
+    os.makedirs(archiv_path, exist_ok=True)
+
+    return archiv_path
+
+
+def archive_beleg(beleg_pfad, konto_name, periode):
+    """
+    Verschiebt einen Beleg ins Archiv-Verzeichnis.
+    Gibt den neuen Pfad zurück oder None bei Fehler.
+    """
+    import shutil
+
+    if not beleg_pfad or not os.path.exists(beleg_pfad):
+        return None
+
+    archiv_dir = get_archiv_path(konto_name, periode)
+    filename = os.path.basename(beleg_pfad)
+    target_path = os.path.join(archiv_dir, filename)
+
+    # Bei Namenskonflikt: Nummer anhängen
+    if os.path.exists(target_path) and os.path.abspath(beleg_pfad) != os.path.abspath(target_path):
+        base, ext = os.path.splitext(filename)
+        counter = 1
+        while os.path.exists(target_path):
+            target_path = os.path.join(archiv_dir, f"{base}_{counter}{ext}")
+            counter += 1
+
+    # Nur verschieben wenn nicht bereits im Zielverzeichnis
+    if os.path.abspath(beleg_pfad) != os.path.abspath(target_path):
+        try:
+            shutil.move(beleg_pfad, target_path)
+        except Exception as e:
+            print(f"Archivierung fehlgeschlagen für {filename}: {e}")
+            return None
+
+    return target_path
+
+
+def archive_abrechnung(abrechnung_id):
+    """
+    Archiviert alle Belege einer Abrechnung.
+    Verschiebt Belege nach belege/archiv/{Konto}/{Periode}/
+    Aktualisiert die Pfade in der Datenbank.
+    Gibt die Anzahl archivierter Belege zurück.
+    """
+    conn = get_db()
+
+    # Hole Abrechnung mit Konto-Info
+    abrechnung = conn.execute('''
+        SELECT a.*, k.name as konto_name
+        FROM abrechnungen a
+        LEFT JOIN konten k ON a.konto_id = k.id
+        WHERE a.id = ?
+    ''', (abrechnung_id,)).fetchone()
+
+    if not abrechnung:
+        conn.close()
+        return 0
+
+    konto_name = abrechnung['konto_name']
+    periode = abrechnung['periode']
+
+    # Hole alle Belege dieser Abrechnung
+    belege = conn.execute('''
+        SELECT b.id, b.datei_pfad
+        FROM belege b
+        JOIN transaktionen t ON b.transaktion_id = t.id
+        WHERE t.abrechnung_id = ?
+    ''', (abrechnung_id,)).fetchall()
+
+    archived_count = 0
+
+    for beleg in belege:
+        if beleg['datei_pfad']:
+            new_path = archive_beleg(beleg['datei_pfad'], konto_name, periode)
+            if new_path and new_path != beleg['datei_pfad']:
+                # Update Pfad in Datenbank
+                conn.execute('UPDATE belege SET datei_pfad = ? WHERE id = ?',
+                           (new_path, beleg['id']))
+                archived_count += 1
+
+    # Archiviere auch Bewirtungsbelege
+    bewirtungsbelege = conn.execute('''
+        SELECT bw.id, bw.datei_pfad
+        FROM bewirtungsbelege bw
+        JOIN transaktionen t ON bw.transaktion_id = t.id
+        WHERE t.abrechnung_id = ?
+    ''', (abrechnung_id,)).fetchall()
+
+    for bw in bewirtungsbelege:
+        if bw['datei_pfad']:
+            new_path = archive_beleg(bw['datei_pfad'], konto_name, periode)
+            if new_path and new_path != bw['datei_pfad']:
+                conn.execute('UPDATE bewirtungsbelege SET datei_pfad = ? WHERE id = ?',
+                           (new_path, bw['id']))
+                archived_count += 1
+
+    conn.commit()
+    conn.close()
+
+    return archived_count
+
+
+# =============================================================================
 # Database Functions
 # =============================================================================
 
 def get_db():
     """Get database connection with Row factory."""
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(DATABASE, timeout=30)
     conn.row_factory = sqlite3.Row
+    # WAL-Modus für bessere Concurrent-Access Performance
+    conn.execute('PRAGMA journal_mode=WAL')
+    conn.execute('PRAGMA busy_timeout=30000')
     return conn
 
 
@@ -1041,6 +1160,44 @@ def download_beleg(id):
     return send_file(filepath, as_attachment=False)
 
 
+@app.route('/api/belege/<int:id>', methods=['DELETE'])
+def delete_beleg(id):
+    """Delete a receipt."""
+    conn = get_db()
+    beleg = conn.execute('SELECT * FROM belege WHERE id = ?', (id,)).fetchone()
+
+    if not beleg:
+        conn.close()
+        return jsonify({'error': 'Beleg nicht gefunden'}), 404
+
+    # Check if assigned to a transaction
+    if beleg['transaktion_id']:
+        # Update transaction status back to 'offen'
+        conn.execute('''
+            UPDATE transaktionen SET status = 'offen'
+            WHERE id = ? AND status = 'zugeordnet'
+        ''', (beleg['transaktion_id'],))
+
+    # Delete from database
+    conn.execute('DELETE FROM belege WHERE id = ?', (id,))
+    conn.commit()
+    conn.close()
+
+    # Delete file if exists
+    filepath = beleg['datei_pfad']
+    if filepath and os.path.exists(filepath):
+        try:
+            os.remove(filepath)
+        except Exception as e:
+            app.logger.warning(f"Datei konnte nicht gelöscht werden: {e}")
+
+    return jsonify({
+        'success': True,
+        'message': 'Beleg gelöscht',
+        'was_assigned': beleg['transaktion_id'] is not None
+    })
+
+
 @app.route('/api/belege/upload', methods=['POST'])
 def upload_beleg():
     """Upload and process a receipt."""
@@ -1660,6 +1817,8 @@ def export_abrechnung_zip(id):
     # Create ZIP in memory
     zip_buffer = BytesIO()
     periode_clean = (abrechnung['periode'] or 'export').replace(' ', '_').replace('.', '-').replace('/', '-')
+    konto_clean = (abrechnung['konto_name'] or 'Kreditkarte').replace(' ', '_').replace('.', '-').replace('/', '-')
+    base_name = f"{konto_clean}_{periode_clean}"
 
     def add_file_utf8(zf, filepath, arcname):
         """Add file to ZIP with proper UTF-8 filename encoding."""
@@ -1673,20 +1832,20 @@ def export_abrechnung_zip(id):
     with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
         # 1. Add original statement PDF if exists
         if abrechnung['datei_pfad'] and os.path.exists(abrechnung['datei_pfad']):
-            add_file_utf8(zf, abrechnung['datei_pfad'], f"00_Kreditkartenabrechnung_{periode_clean}.pdf")
+            add_file_utf8(zf, abrechnung['datei_pfad'], f"{base_name}/00_Abrechnung_{periode_clean}.pdf")
 
         # 2. Add all receipts
         for t in transaktionen:
             if t['beleg_pfad'] and os.path.exists(t['beleg_pfad']):
                 # Use the already renamed filename (with position prefix)
-                add_file_utf8(zf, t['beleg_pfad'], f"Belege/{t['beleg_datei']}")
+                add_file_utf8(zf, t['beleg_pfad'], f"{base_name}/Belege/{t['beleg_datei']}")
 
         # 3. Add all Bewirtungsbelege
         for bw in bewirtungsbelege:
             if bw['datei_pfad'] and os.path.exists(bw['datei_pfad']):
                 # Extract filename from path
                 bw_filename = os.path.basename(bw['datei_pfad'])
-                add_file_utf8(zf, bw['datei_pfad'], f"Bewirtungsbelege/{bw_filename}")
+                add_file_utf8(zf, bw['datei_pfad'], f"{base_name}/Bewirtungsbelege/{bw_filename}")
 
         # 4. Generate and add PDF report
         pdf_buffer = BytesIO()
@@ -1768,13 +1927,20 @@ def export_abrechnung_zip(id):
         pdf_buffer.seek(0)
 
         # Add PDF report with UTF-8 filename
-        report_info = zipfile.ZipInfo(f"Transaktionsliste_{periode_clean}.pdf")
+        report_info = zipfile.ZipInfo(f"{base_name}/Transaktionsliste_{periode_clean}.pdf")
         report_info.flag_bits |= 0x800  # UTF-8 filename flag
         report_info.compress_type = zipfile.ZIP_DEFLATED
         zf.writestr(report_info, pdf_buffer.read())
 
     zip_buffer.seek(0)
-    filename = f"Kreditkartenabrechnung_{periode_clean}.zip"
+    filename = f"{base_name}.zip"
+
+    # Archiviere Belege nach erfolgreichem Export
+    archive = request.args.get('archive', 'true').lower() == 'true'
+    if archive:
+        archived_count = archive_abrechnung(id)
+        if archived_count > 0:
+            app.logger.info(f"Archiviert: {archived_count} Belege für {base_name}")
 
     return send_file(
         zip_buffer,
@@ -1782,6 +1948,27 @@ def export_abrechnung_zip(id):
         as_attachment=True,
         download_name=filename
     )
+
+
+# --- Archivierung ---
+
+@app.route('/api/abrechnungen/<int:id>/archivieren', methods=['POST'])
+def archiviere_abrechnung(id):
+    """Archiviert alle Belege einer Abrechnung manuell."""
+    archived_count = archive_abrechnung(id)
+
+    if archived_count > 0:
+        return jsonify({
+            'success': True,
+            'message': f'{archived_count} Beleg(e) archiviert',
+            'archived_count': archived_count
+        })
+    else:
+        return jsonify({
+            'success': True,
+            'message': 'Keine Belege zum Archivieren gefunden',
+            'archived_count': 0
+        })
 
 
 # --- Kategorien ---

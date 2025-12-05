@@ -319,6 +319,13 @@
                             <input type="file" id="beleg-input" hidden multiple accept=".pdf,.png,.jpg,.jpeg">
                         </div>
 
+                        <!-- Auto-Match Button -->
+                        <div style="margin-top: 12px; text-align: center;">
+                            <a class="btn-small waves-effect waves-light" onclick="autoMatchAllBelege()">
+                                <i class="material-icons left">auto_fix_high</i>Alle zuordnen
+                            </a>
+                        </div>
+
                         <!-- Unassigned Receipts -->
                         <div id="unzugeordnete-belege" style="margin-top: 16px;">
                         </div>
@@ -932,11 +939,11 @@
 
                 html += `
                     <li>
-                        <div class="collapsible-header">
+                        <div class="collapsible-header" style="display: flex; align-items: center;">
                             <i class="material-icons">folder</i>
-                            ${katName}
-                            <span class="badge">${items.length}</span>
-                            <span style="margin-left: auto; margin-right: 16px;">${summe.toFixed(2)} €</span>
+                            <span style="flex: 1;">${katName}</span>
+                            <span style="min-width: 40px; text-align: center; color: #9e9e9e;">${items.length}</span>
+                            <span style="min-width: 100px; text-align: right; margin-right: 8px;">${summe.toFixed(2)} €</span>
                         </div>
                         <div class="collapsible-body" style="padding: 0;">`;
 
@@ -1000,10 +1007,10 @@
                 const data = JSON.parse(b.extrahierte_daten || '{}');
                 const isPdf = b.datei_name.toLowerCase().endsWith('.pdf');
                 html += `
-                    <li class="collection-item" style="cursor: pointer;" onclick="${isPdf ? `openPdfViewer(${b.id}, '${b.datei_name.replace(/'/g, "\\'")}')` : ''}">
+                    <li class="collection-item">
                         <div style="display: flex; align-items: center; gap: 10px;">
                             <i class="material-icons grey-text">${isPdf ? 'picture_as_pdf' : 'image'}</i>
-                            <div style="flex: 1; min-width: 0;">
+                            <div style="flex: 1; min-width: 0; cursor: pointer;" onclick="${isPdf ? `openPdfViewer(${b.id}, '${b.datei_name.replace(/'/g, "\\'")}')` : ''}">
                                 <span class="title truncate" style="display: block;">${b.datei_name}</span>
                                 <p style="margin: 0;">
                                     ${data.betrag ? data.betrag.toFixed(2) + ' €' : ''}
@@ -1011,7 +1018,8 @@
                                     <small class="grey-text">${data.haendler || ''}</small>
                                 </p>
                             </div>
-                            <i class="material-icons grey-text text-lighten-1">visibility</i>
+                            ${isPdf ? `<a class="btn-flat btn-small waves-effect" onclick="openPdfViewer(${b.id}, '${b.datei_name.replace(/'/g, "\\'")}')"><i class="material-icons">visibility</i></a>` : ''}
+                            <a class="btn-flat btn-small waves-effect red-text" onclick="deleteBeleg(${b.id}, '${b.datei_name.replace(/'/g, "\\'")}')" title="Beleg löschen"><i class="material-icons">delete</i></a>
                         </div>
                     </li>`;
             });
@@ -1210,6 +1218,38 @@
             M.Modal.getInstance(document.getElementById('transaktion-modal')).close();
         }
 
+        // Auto-match all unassigned receipts
+        async function autoMatchAllBelege() {
+            const abrechnungId = document.getElementById('abrechnung-select').value;
+
+            M.toast({html: 'Starte automatische Zuordnung...'});
+
+            try {
+                const result = await api('/api/belege/auto-match', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        abrechnung_id: abrechnungId || null,
+                        threshold: 0.5
+                    })
+                });
+
+                if (result.matches_found > 0) {
+                    M.toast({html: `${result.matches_found} Beleg(e) zugeordnet!`, classes: 'green'});
+                } else {
+                    M.toast({html: 'Keine passenden Zuordnungen gefunden', classes: 'orange'});
+                }
+
+                // Refresh views
+                if (abrechnungId) {
+                    await loadAbrechnung();
+                }
+                loadUnzugeordneteBelege();
+
+            } catch (err) {
+                M.toast({html: 'Fehler bei der Zuordnung: ' + err.message, classes: 'red'});
+            }
+        }
+
         // Load all unassigned receipts for manual selection
         let allUnassignedBelege = [];
         async function loadManualBelegSelect() {
@@ -1308,6 +1348,19 @@
 
             // Close modal
             M.Modal.getInstance(document.getElementById('transaktion-modal')).close();
+        }
+
+        // Delete unassigned receipt
+        async function deleteBeleg(belegId, dateiName) {
+            if (!confirm(`Beleg "${dateiName}" wirklich löschen?\n\nDie Datei wird unwiderruflich gelöscht.`)) return;
+
+            try {
+                await api(`/api/belege/${belegId}`, { method: 'DELETE' });
+                M.toast({html: 'Beleg gelöscht', classes: 'green'});
+                loadUnzugeordneteBelege();
+            } catch (err) {
+                M.toast({html: 'Fehler beim Löschen: ' + err.message, classes: 'red'});
+            }
         }
 
         // Save transaction

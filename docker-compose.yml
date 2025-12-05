@@ -1,9 +1,7 @@
 services:
-  app:
+  kreditkarten:
     build: .
     container_name: kreditkarten-app
-    ports:
-      - "5002:5000"
     volumes:
       # Persistente Daten
       - ./data:/app/data
@@ -21,6 +19,8 @@ services:
       - EXPORTS_DIR=/app/exports
     env_file:
       - .env
+    networks:
+      - traefik-proxy
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
@@ -28,7 +28,12 @@ services:
       timeout: 10s
       retries: 3
       start_period: 15s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.kreditkarten.rule=Host(`kreditkarten.localhost`)"
+      - "traefik.http.routers.kreditkarten.entrypoints=web"
+      - "traefik.http.services.kreditkarten.loadbalancer.server.port=5000"
 
 networks:
-  default:
-    driver: bridge
+  traefik-proxy:
+    external: true
