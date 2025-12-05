@@ -539,6 +539,10 @@
                     <input type="text" id="settings-firma">
                     <label for="settings-firma">Firma</label>
                 </div>
+                <div class="input-field col s12">
+                    <input type="text" id="settings-bewirtender">
+                    <label for="settings-bewirtender">Bewirtender Name (für Bewirtungsbelege)</label>
+                </div>
                 <div class="col s12">
                     <label>
                         <input type="checkbox" id="settings-auto-kat" checked>
@@ -556,6 +560,86 @@
         <div class="modal-footer">
             <a href="#!" class="modal-close waves-effect btn-flat">Schließen</a>
             <a href="#!" class="waves-effect waves-light btn" onclick="saveSettings()">Speichern</a>
+        </div>
+    </div>
+
+    <!-- Bewirtungsbeleg Modal -->
+    <div id="bewirtungsbeleg-modal" class="modal modal-fixed-footer" style="max-width: 700px;">
+        <div class="modal-content">
+            <h4>Bewirtungsbeleg erstellen</h4>
+            <p class="grey-text">gemäß § 4 Abs. 5 Nr. 2 EStG</p>
+
+            <div class="row">
+                <div class="input-field col s6">
+                    <input type="text" id="bew-datum" readonly>
+                    <label for="bew-datum" class="active">Datum</label>
+                </div>
+                <div class="input-field col s6">
+                    <input type="text" id="bew-betrag" readonly>
+                    <label for="bew-betrag" class="active">Betrag</label>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="input-field col s12">
+                    <input type="text" id="bew-restaurant">
+                    <label for="bew-restaurant" class="active">Restaurant/Ort</label>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="input-field col s12">
+                    <input type="text" id="bew-ort">
+                    <label for="bew-ort">Anschrift (optional)</label>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="input-field col s12">
+                    <input type="text" id="bew-anlass" value="Geschäftliche Besprechung">
+                    <label for="bew-anlass" class="active">Anlass der Bewirtung</label>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col s12">
+                    <label>Bewirtete Personen</label>
+                    <div id="bew-teilnehmer-list" class="collection" style="margin-top: 10px; min-height: 50px; border: 1px solid #e0e0e0; border-radius: 4px;">
+                        <!-- Teilnehmer werden hier eingefügt -->
+                    </div>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="input-field col s6">
+                    <input type="text" id="bew-person-name" placeholder="Name">
+                    <label for="bew-person-name" class="active">Neuer Gast</label>
+                </div>
+                <div class="input-field col s5">
+                    <input type="text" id="bew-person-firma" placeholder="Firma/Funktion">
+                </div>
+                <div class="col s1" style="padding-top: 25px;">
+                    <a class="btn-floating btn-small waves-effect waves-light green" onclick="addBewTeilnehmer()">
+                        <i class="material-icons">add</i>
+                    </a>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col s12">
+                    <p class="grey-text text-darken-1" style="font-size: 0.9rem;">
+                        <i class="material-icons tiny">info</i>
+                        Gespeicherte Kontakte:
+                        <span id="bew-kontakte-chips"></span>
+                    </p>
+                </div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <a href="#!" class="modal-close waves-effect btn-flat">Abbrechen</a>
+            <a href="#!" class="waves-effect waves-light btn" onclick="createBewirtungsbeleg()">
+                <i class="material-icons left">picture_as_pdf</i>PDF erstellen
+            </a>
         </div>
     </div>
 
@@ -801,6 +885,7 @@
                     const statusIcon = t.status === 'zugeordnet' ? 'check_circle' :
                                       t.status === 'ignoriert' ? 'cancel' : 'radio_button_unchecked';
                     const posNr = t.position ? String(t.position).padStart(2, '0') : '--';
+                    const showBewirtung = isRestaurantTransaction(t);
 
                     html += `
                         <div class="transaction-row" onclick="openTransaktion(${t.id})">
@@ -814,6 +899,7 @@
                             <span class="transaction-status">
                                 <i class="material-icons tiny ${statusClass}">${statusIcon}</i>
                                 ${t.beleg_datei ? '<i class="material-icons tiny">attachment</i>' : ''}
+                                ${showBewirtung ? `<a class="btn-flat btn-small" onclick="event.stopPropagation(); openBewirtungsbeleg(${t.id})" title="Bewirtungsbeleg"><i class="material-icons tiny">receipt_long</i></a>` : ''}
                             </span>
                         </div>`;
                 });
@@ -1420,7 +1506,15 @@
             M.Modal.getInstance(document.getElementById('konto-modal')).open();
         }
 
-        function openSettings() {
+        async function openSettings() {
+            // Load current settings
+            const settings = await api('/api/einstellungen');
+            if (settings) {
+                document.getElementById('settings-name').value = settings.name || '';
+                document.getElementById('settings-firma').value = settings.firma || '';
+                document.getElementById('settings-bewirtender').value = settings.bewirtender_name || '';
+                M.updateTextFields();
+            }
             M.Modal.getInstance(document.getElementById('settings-modal')).open();
         }
 
@@ -1431,10 +1525,11 @@
         // Save settings
         async function saveSettings() {
             await api('/api/einstellungen', {
-                method: 'POST',
+                method: 'PUT',
                 body: JSON.stringify({
                     name: document.getElementById('settings-name').value,
                     firma: document.getElementById('settings-firma').value,
+                    bewirtender_name: document.getElementById('settings-bewirtender').value,
                     auto_kategorisieren: document.getElementById('settings-auto-kat').checked,
                     auto_matching: document.getElementById('settings-auto-match').checked
                 })
@@ -1639,6 +1734,173 @@
                 a.download = pdfCurrentFilename || 'beleg.pdf';
                 a.click();
             }
+        }
+
+        // ==================== Bewirtungsbeleg ====================
+
+        let bewirtungTransaktionId = null;
+        let bewirtungTeilnehmer = [];
+        let gespeichertePersonen = [];
+
+        async function loadPersonen() {
+            gespeichertePersonen = await api('/api/personen');
+            updateKontakteChips();
+        }
+
+        function updateKontakteChips() {
+            const container = document.getElementById('bew-kontakte-chips');
+            if (gespeichertePersonen.length === 0) {
+                container.innerHTML = '<em>Keine gespeichert</em>';
+                return;
+            }
+            container.innerHTML = gespeichertePersonen.map(p =>
+                `<span class="chip" style="cursor: pointer;" onclick="addPersonFromKontakt(${p.id})">${p.name}${p.firma ? ' (' + p.firma + ')' : ''}</span>`
+            ).join('');
+        }
+
+        function addPersonFromKontakt(personId) {
+            const person = gespeichertePersonen.find(p => p.id === personId);
+            if (person && !bewirtungTeilnehmer.find(t => t.name === person.name)) {
+                bewirtungTeilnehmer.push({ name: person.name, firma: person.firma || '' });
+                updateTeilnehmerList();
+            }
+        }
+
+        function addBewTeilnehmer() {
+            const nameInput = document.getElementById('bew-person-name');
+            const firmaInput = document.getElementById('bew-person-firma');
+
+            const name = nameInput.value.trim();
+            const firma = firmaInput.value.trim();
+
+            if (!name) {
+                M.toast({ html: 'Bitte Name eingeben' });
+                return;
+            }
+
+            if (!bewirtungTeilnehmer.find(t => t.name === name)) {
+                bewirtungTeilnehmer.push({ name, firma });
+                updateTeilnehmerList();
+
+                // Save new person if not exists
+                if (!gespeichertePersonen.find(p => p.name === name)) {
+                    api('/api/personen', {
+                        method: 'POST',
+                        body: JSON.stringify({ name, firma })
+                    }).then(() => loadPersonen());
+                }
+            }
+
+            nameInput.value = '';
+            firmaInput.value = '';
+            nameInput.focus();
+        }
+
+        function removeBewTeilnehmer(index) {
+            bewirtungTeilnehmer.splice(index, 1);
+            updateTeilnehmerList();
+        }
+
+        function updateTeilnehmerList() {
+            const container = document.getElementById('bew-teilnehmer-list');
+            if (bewirtungTeilnehmer.length === 0) {
+                container.innerHTML = '<p class="grey-text center-align" style="padding: 15px;">Noch keine Gäste hinzugefügt</p>';
+                return;
+            }
+            container.innerHTML = bewirtungTeilnehmer.map((t, i) =>
+                `<div class="collection-item" style="display: flex; justify-content: space-between; align-items: center;">
+                    <span><strong>${t.name}</strong>${t.firma ? ' - ' + t.firma : ''}</span>
+                    <a class="btn-flat btn-small" onclick="removeBewTeilnehmer(${i})"><i class="material-icons grey-text">close</i></a>
+                </div>`
+            ).join('');
+        }
+
+        async function openBewirtungsbeleg(transaktionId) {
+            bewirtungTransaktionId = transaktionId;
+            bewirtungTeilnehmer = [];
+
+            // Load saved persons
+            await loadPersonen();
+
+            // Get transaction data
+            const t = transaktionen.find(tr => tr.id === transaktionId);
+            if (!t) return;
+
+            // Format date
+            let datumFormatted = t.datum;
+            if (t.datum && t.datum.includes('-')) {
+                const [y, m, d] = t.datum.split('-');
+                datumFormatted = `${d}.${m}.${y}`;
+            }
+
+            // Format amount
+            const betrag = (t.betrag_eur || t.betrag || 0).toFixed(2).replace('.', ',') + ' €';
+
+            // Fill form
+            document.getElementById('bew-datum').value = datumFormatted;
+            document.getElementById('bew-betrag').value = betrag;
+            document.getElementById('bew-restaurant').value = t.haendler || t.beschreibung || '';
+            document.getElementById('bew-ort').value = '';
+            document.getElementById('bew-anlass').value = 'Geschäftliche Besprechung';
+
+            updateTeilnehmerList();
+
+            // Update labels
+            M.updateTextFields();
+
+            // Open modal
+            M.Modal.getInstance(document.getElementById('bewirtungsbeleg-modal')).open();
+        }
+
+        async function createBewirtungsbeleg() {
+            if (bewirtungTeilnehmer.length === 0) {
+                M.toast({ html: 'Bitte mindestens einen Gast hinzufügen' });
+                return;
+            }
+
+            const data = {
+                restaurant: document.getElementById('bew-restaurant').value,
+                ort: document.getElementById('bew-ort').value,
+                anlass: document.getElementById('bew-anlass').value,
+                teilnehmer: bewirtungTeilnehmer
+            };
+
+            try {
+                const response = await fetch(`/api/transaktionen/${bewirtungTransaktionId}/bewirtungsbeleg`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+
+                if (response.ok) {
+                    // Download PDF
+                    const blob = await response.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = response.headers.get('Content-Disposition')?.split('filename=')[1]?.replace(/"/g, '') || 'Bewirtungsbeleg.pdf';
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+
+                    M.toast({ html: 'Bewirtungsbeleg erstellt!' });
+                    M.Modal.getInstance(document.getElementById('bewirtungsbeleg-modal')).close();
+                } else {
+                    const err = await response.json();
+                    M.toast({ html: 'Fehler: ' + (err.error || 'Unbekannt') });
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                M.toast({ html: 'Fehler beim Erstellen' });
+            }
+        }
+
+        // Check if transaction is restaurant/bewirtung category
+        function isRestaurantTransaction(transaktion) {
+            const kat = (transaktion.kategorie || '').toLowerCase();
+            const desc = (transaktion.beschreibung || '').toLowerCase();
+            return kat.includes('restaurant') || kat.includes('bewirtung') ||
+                   desc.includes('restaurant') || desc.includes('gastst') ||
+                   desc.includes('cafe') || desc.includes('bistro');
         }
     </script>
 </body>

@@ -158,7 +158,33 @@ def init_db():
             firma TEXT,
             standard_kategorie TEXT DEFAULT 'sonstiges',
             auto_kategorisieren BOOLEAN DEFAULT 1,
-            auto_matching BOOLEAN DEFAULT 1
+            auto_matching BOOLEAN DEFAULT 1,
+            bewirtender_name TEXT,
+            unterschrift_base64 TEXT
+        );
+
+        -- Personen für Bewirtungsbelege (Gästeliste)
+        CREATE TABLE IF NOT EXISTS personen (
+            id INTEGER PRIMARY KEY,
+            name TEXT NOT NULL,
+            firma TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        -- Bewirtungsbelege
+        CREATE TABLE IF NOT EXISTS bewirtungsbelege (
+            id INTEGER PRIMARY KEY,
+            transaktion_id INTEGER REFERENCES transaktionen(id),
+            beleg_nr INTEGER,
+            datum TEXT,
+            restaurant TEXT,
+            ort TEXT,
+            anlass TEXT,
+            teilnehmer TEXT,
+            bewirtender_name TEXT,
+            betrag REAL,
+            datei_pfad TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
 
         -- Default-Einstellungen
@@ -450,6 +476,76 @@ def update_konto(id):
     conn.commit()
     conn.close()
 
+    return jsonify({'success': True})
+
+
+# --- Personen (Gäste für Bewirtungsbelege) ---
+
+@app.route('/api/personen', methods=['GET'])
+def get_personen():
+    """Get all persons for guest list."""
+    conn = get_db()
+    personen = conn.execute('SELECT * FROM personen ORDER BY name').fetchall()
+    conn.close()
+    return jsonify([dict(p) for p in personen])
+
+
+@app.route('/api/personen', methods=['POST'])
+def create_person():
+    """Create a new person."""
+    data = request.json
+    conn = get_db()
+    cursor = conn.execute(
+        'INSERT INTO personen (name, firma) VALUES (?, ?)',
+        (data['name'], data.get('firma'))
+    )
+    person_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    return jsonify({'id': person_id, 'success': True})
+
+
+@app.route('/api/personen/<int:id>', methods=['DELETE'])
+def delete_person(id):
+    """Delete a person."""
+    conn = get_db()
+    conn.execute('DELETE FROM personen WHERE id = ?', (id,))
+    conn.commit()
+    conn.close()
+    return jsonify({'success': True})
+
+
+# --- Einstellungen ---
+
+@app.route('/api/einstellungen', methods=['GET'])
+def get_einstellungen():
+    """Get settings."""
+    conn = get_db()
+    einst = conn.execute('SELECT * FROM einstellungen WHERE id = 1').fetchone()
+    conn.close()
+    return jsonify(dict(einst) if einst else {})
+
+
+@app.route('/api/einstellungen', methods=['PUT'])
+def update_einstellungen():
+    """Update settings."""
+    data = request.json
+    conn = get_db()
+
+    # Build dynamic update query
+    fields = []
+    values = []
+    for key in ['name', 'firma', 'bewirtender_name', 'unterschrift_base64']:
+        if key in data:
+            fields.append(f'{key} = ?')
+            values.append(data[key])
+
+    if fields:
+        values.append(1)
+        conn.execute(f"UPDATE einstellungen SET {', '.join(fields)} WHERE id = ?", values)
+        conn.commit()
+
+    conn.close()
     return jsonify({'success': True})
 
 
@@ -1658,39 +1754,234 @@ def get_kategorien():
     return jsonify(KATEGORIEN)
 
 
-# --- Einstellungen ---
+# --- Bewirtungsbelege ---
 
-@app.route('/api/einstellungen', methods=['GET'])
-def get_einstellungen():
-    """Get application settings."""
-    conn = get_db()
-    einstellungen = conn.execute('SELECT * FROM einstellungen WHERE id = 1').fetchone()
-    conn.close()
-    return jsonify(dict(einstellungen) if einstellungen else {})
+@app.route('/api/transaktionen/<int:id>/bewirtungsbeleg', methods=['POST'])
+def create_bewirtungsbeleg(id):
+    """Generate Bewirtungsbeleg PDF for a restaurant transaction."""
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import mm
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+    from io import BytesIO
+    import base64
+    import json
+    import os
 
+    # Register Unicode font
+    try:
+        pdfmetrics.registerFont(TTFont('DejaVu', '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'))
+        pdfmetrics.registerFont(TTFont('DejaVu-Bold', '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'))
+        unicode_font = 'DejaVu'
+        unicode_font_bold = 'DejaVu-Bold'
+    except:
+        unicode_font = 'Helvetica'
+        unicode_font_bold = 'Helvetica-Bold'
 
-@app.route('/api/einstellungen', methods=['POST'])
-def update_einstellungen():
-    """Update application settings."""
     data = request.json
     conn = get_db()
 
-    conn.execute('''
-        UPDATE einstellungen
-        SET name = ?, firma = ?, standard_kategorie = ?,
-            auto_kategorisieren = ?, auto_matching = ?
-        WHERE id = 1
-    ''', (
-        data.get('name'),
-        data.get('firma'),
-        data.get('standard_kategorie', 'sonstiges'),
-        data.get('auto_kategorisieren', True),
-        data.get('auto_matching', True)
+    # Get transaction
+    transaktion = conn.execute('SELECT * FROM transaktionen WHERE id = ?', (id,)).fetchone()
+    if not transaktion:
+        conn.close()
+        return jsonify({'error': 'Transaktion nicht gefunden'}), 404
+
+    # Get settings for bewirtender name and signature
+    einst = conn.execute('SELECT * FROM einstellungen WHERE id = 1').fetchone()
+
+    # Count existing Bewirtungsbelege for numbering
+    abrechnung_id = transaktion['abrechnung_id']
+    count = conn.execute(
+        'SELECT COUNT(*) FROM bewirtungsbelege b JOIN transaktionen t ON b.transaktion_id = t.id WHERE t.abrechnung_id = ?',
+        (abrechnung_id,)
+    ).fetchone()[0]
+    beleg_nr = count + 1
+
+    # Parse data
+    datum = data.get('datum', transaktion['datum'])
+    if datum and '-' in datum:
+        try:
+            from datetime import datetime as dt
+            d = dt.strptime(datum, '%Y-%m-%d')
+            datum_formatted = d.strftime('%d.%m.%Y')
+        except:
+            datum_formatted = datum
+    else:
+        datum_formatted = datum
+
+    restaurant = data.get('restaurant', transaktion['haendler'] or transaktion['beschreibung'] or '')
+    ort = data.get('ort', '')
+    anlass = data.get('anlass', 'Geschäftliche Besprechung')
+    teilnehmer = data.get('teilnehmer', [])  # List of {name, firma}
+    betrag = transaktion['betrag_eur'] or transaktion['betrag'] or 0
+    bewirtender_name = data.get('bewirtender_name') or (einst['bewirtender_name'] if einst else None) or ''
+    unterschrift_base64 = data.get('unterschrift_base64') or (einst['unterschrift_base64'] if einst else None)
+
+    # Create PDF
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4, leftMargin=20*mm, rightMargin=20*mm, topMargin=20*mm, bottomMargin=20*mm)
+
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle('Title', fontName=unicode_font_bold, fontSize=18, spaceAfter=5, textColor=colors.HexColor('#333333'))
+    subtitle_style = ParagraphStyle('Subtitle', fontName=unicode_font, fontSize=10, textColor=colors.grey, spaceAfter=15)
+    label_style = ParagraphStyle('Label', fontName=unicode_font_bold, fontSize=10, textColor=colors.HexColor('#333333'))
+    normal_style = ParagraphStyle('Normal', fontName=unicode_font, fontSize=10, leading=14)
+    footer_style = ParagraphStyle('Footer', fontName=unicode_font, fontSize=8, textColor=colors.grey)
+
+    elements = []
+
+    # Header
+    elements.append(Paragraph(f"Bewirtungsbeleg Nr. {beleg_nr:02d}", title_style))
+    elements.append(Paragraph("gemäß § 4 Abs. 5 Nr. 2 EStG", subtitle_style))
+    elements.append(Spacer(1, 5*mm))
+
+    # Main data table
+    main_data = [
+        [Paragraph("<b>Tag der Bewirtung:</b>", label_style), Paragraph(datum_formatted, normal_style)],
+        [Paragraph("<b>Ort (Name und Anschrift):</b>", label_style), Paragraph(f"{restaurant}\n{ort}" if ort else restaurant, normal_style)],
+    ]
+
+    main_table = Table(main_data, colWidths=[60*mm, 110*mm])
+    main_table.setStyle(TableStyle([
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('TOPPADDING', (0, 0), (-1, -1), 3),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+        ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#f5f5f5')),
+    ]))
+    elements.append(main_table)
+    elements.append(Spacer(1, 8*mm))
+
+    # Guest list
+    elements.append(Paragraph("<b>Bewirtete Personen:</b>", label_style))
+    elements.append(Spacer(1, 3*mm))
+
+    guest_data = [[Paragraph("<b>Name</b>", label_style), Paragraph("<b>Firma/Funktion</b>", label_style)]]
+    for t in teilnehmer:
+        guest_data.append([
+            Paragraph(t.get('name', ''), normal_style),
+            Paragraph(t.get('firma', ''), normal_style)
+        ])
+    # Add empty rows for manual completion (minimum 4 rows total)
+    while len(guest_data) < 5:
+        guest_data.append(['', ''])
+
+    guest_table = Table(guest_data, colWidths=[85*mm, 85*mm])
+    guest_table.setStyle(TableStyle([
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#f5f5f5')),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('TOPPADDING', (0, 0), (-1, -1), 4),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+        ('LEFTPADDING', (0, 0), (-1, -1), 4),
+        ('MINROWHEIGHT', (0, 1), (-1, -1), 8*mm),
+    ]))
+    elements.append(guest_table)
+    elements.append(Spacer(1, 8*mm))
+
+    # Purpose
+    elements.append(Paragraph("<b>Anlass der Bewirtung:</b>", label_style))
+    elements.append(Spacer(1, 2*mm))
+    anlass_table = Table([[Paragraph(anlass, normal_style)]], colWidths=[170*mm])
+    anlass_table.setStyle(TableStyle([
+        ('BOX', (0, 0), (-1, -1), 0.5, colors.grey),
+        ('TOPPADDING', (0, 0), (-1, -1), 4),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+        ('LEFTPADDING', (0, 0), (-1, -1), 4),
+        ('MINROWHEIGHT', (0, 0), (-1, -1), 12*mm),
+    ]))
+    elements.append(anlass_table)
+    elements.append(Spacer(1, 8*mm))
+
+    # Amount
+    betrag_str = f"{betrag:,.2f} €".replace(',', 'X').replace('.', ',').replace('X', '.')
+    amount_data = [[Paragraph("<b>Höhe der Aufwendungen:</b>", label_style), Paragraph(betrag_str, normal_style)]]
+    amount_table = Table(amount_data, colWidths=[60*mm, 110*mm])
+    amount_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (0, 0), colors.HexColor('#f5f5f5')),
+        ('TOPPADDING', (0, 0), (-1, -1), 4),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+    ]))
+    elements.append(amount_table)
+    elements.append(Spacer(1, 15*mm))
+
+    # Signature section
+    elements.append(Paragraph("<b>Unterschrift des Bewirtenden:</b>", label_style))
+    elements.append(Spacer(1, 3*mm))
+
+    # Signature image or blank line
+    if unterschrift_base64:
+        try:
+            sig_data = base64.b64decode(unterschrift_base64.split(',')[1] if ',' in unterschrift_base64 else unterschrift_base64)
+            sig_buffer = BytesIO(sig_data)
+            sig_img = Image(sig_buffer, width=50*mm, height=15*mm)
+            elements.append(sig_img)
+        except:
+            elements.append(Spacer(1, 15*mm))
+    else:
+        elements.append(Spacer(1, 15*mm))
+
+    # Signature line
+    sig_line = Table([['_' * 60]], colWidths=[170*mm])
+    sig_line.setStyle(TableStyle([
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+    ]))
+    elements.append(sig_line)
+    elements.append(Paragraph(f"Datum, Unterschrift: {bewirtender_name}", normal_style))
+    elements.append(Spacer(1, 15*mm))
+
+    # Footer notice
+    elements.append(Paragraph(
+        "<i>Hinweis: Bitte Originalbeleg anheften. Bei Bewirtungen in Gaststätten ist die Rechnung des Gastwirts beizufügen.</i>",
+        footer_style
     ))
 
+    # Build PDF
+    doc.build(elements)
+    pdf_data = buffer.getvalue()
+    buffer.close()
+
+    # Save to database and file
+    restaurant_clean = re.sub(r'[^\w\s-]', '', restaurant).replace(' ', '_')[:30]
+    filename = f"{beleg_nr:02d}_{datum.replace('-', '')}_{restaurant_clean}_Bewirtungsbeleg.pdf"
+
+    # Save to exports directory
+    export_dir = '/app/exports/bewirtungsbelege'
+    os.makedirs(export_dir, exist_ok=True)
+    filepath = os.path.join(export_dir, filename)
+    with open(filepath, 'wb') as f:
+        f.write(pdf_data)
+
+    # Save record
+    conn.execute('''
+        INSERT INTO bewirtungsbelege (transaktion_id, beleg_nr, datum, restaurant, ort, anlass, teilnehmer, bewirtender_name, betrag, datei_pfad)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (id, beleg_nr, datum, restaurant, ort, anlass, json.dumps(teilnehmer), bewirtender_name, betrag, filepath))
     conn.commit()
     conn.close()
-    return jsonify({'success': True})
+
+    # Return PDF
+    return send_file(
+        BytesIO(pdf_data),
+        mimetype='application/pdf',
+        as_attachment=True,
+        download_name=filename
+    )
+
+
+@app.route('/api/transaktionen/<int:id>/bewirtungsbeleg', methods=['GET'])
+def get_bewirtungsbeleg(id):
+    """Get existing Bewirtungsbeleg for a transaction."""
+    conn = get_db()
+    beleg = conn.execute('SELECT * FROM bewirtungsbelege WHERE transaktion_id = ?', (id,)).fetchone()
+    conn.close()
+
+    if beleg:
+        return jsonify(dict(beleg))
+    return jsonify(None)
 
 
 # =============================================================================
