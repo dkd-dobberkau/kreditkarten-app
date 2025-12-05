@@ -204,6 +204,7 @@
                 Kreditkarten-Abgleich
             </a>
             <ul id="nav-mobile" class="right">
+                <li><a href="#" onclick="openPersonenModal()" title="Personen verwalten"><i class="material-icons">people</i></a></li>
                 <li><a href="#" onclick="openSettings()"><i class="material-icons">settings</i></a></li>
                 <li><a href="#" onclick="showHelp()"><i class="material-icons">help</i></a></li>
             </ul>
@@ -555,6 +556,27 @@
                         <span>Automatisches Beleg-Matching</span>
                     </label>
                 </div>
+                <div class="col s12" style="margin-top: 20px;">
+                    <label>Unterschrift (für Bewirtungsbelege)</label>
+                    <div class="file-field input-field" style="margin-top: 8px;">
+                        <div class="btn btn-small">
+                            <span>PNG hochladen</span>
+                            <input type="file" id="signature-upload" accept="image/png" onchange="uploadSignature(this)">
+                        </div>
+                        <div class="file-path-wrapper">
+                            <input class="file-path validate" type="text" placeholder="Unterschrift als PNG auswählen...">
+                        </div>
+                    </div>
+                    <div id="signature-preview-container" style="display: none; margin-top: 10px;">
+                        <p class="grey-text" style="margin-bottom: 5px;">Vorschau:</p>
+                        <div style="border: 1px solid #e0e0e0; border-radius: 4px; padding: 10px; background: #fff; display: inline-block;">
+                            <img id="signature-preview" style="max-width: 200px; max-height: 80px;">
+                        </div>
+                        <a class="btn-small waves-effect waves-light red" onclick="clearSignature()" style="margin-left: 10px; vertical-align: top;">
+                            <i class="material-icons">delete</i>
+                        </a>
+                    </div>
+                </div>
             </div>
         </div>
         <div class="modal-footer">
@@ -640,6 +662,44 @@
             <a href="#!" class="waves-effect waves-light btn" onclick="createBewirtungsbeleg()">
                 <i class="material-icons left">picture_as_pdf</i>PDF erstellen
             </a>
+        </div>
+    </div>
+
+    <!-- Personen Modal -->
+    <div id="personen-modal" class="modal modal-fixed-footer" style="max-width: 600px; max-height: 80%;">
+        <div class="modal-content">
+            <h4><i class="material-icons left">people</i>Personen verwalten</h4>
+            <p class="grey-text">Kontakte für Bewirtungsbelege</p>
+
+            <div class="row" style="margin-top: 20px;">
+                <div class="input-field col s5">
+                    <input type="text" id="person-name" placeholder="Name eingeben">
+                    <label for="person-name" class="active">Name *</label>
+                </div>
+                <div class="input-field col s5">
+                    <input type="text" id="person-firma" placeholder="Firma/Funktion">
+                    <label for="person-firma" class="active">Firma</label>
+                </div>
+                <div class="col s2" style="padding-top: 25px;">
+                    <a class="btn-floating waves-effect waves-light green" onclick="savePersonFromModal()">
+                        <i class="material-icons">add</i>
+                    </a>
+                </div>
+            </div>
+
+            <div class="divider"></div>
+
+            <ul id="personen-list" class="collection" style="margin-top: 15px; max-height: 300px; overflow-y: auto;">
+                <!-- Personen werden hier eingefügt -->
+            </ul>
+
+            <div id="personen-empty" class="center-align grey-text" style="padding: 30px; display: none;">
+                <i class="material-icons medium">person_add</i>
+                <p>Noch keine Personen angelegt</p>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <a href="#!" class="modal-close waves-effect btn-flat">Schließen</a>
         </div>
     </div>
 
@@ -1506,6 +1566,40 @@
             M.Modal.getInstance(document.getElementById('konto-modal')).open();
         }
 
+        // Signature state
+        let signatureBase64 = null;
+
+        function uploadSignature(input) {
+            const file = input.files[0];
+            if (!file) return;
+
+            if (!file.type.includes('png')) {
+                M.toast({ html: 'Bitte nur PNG-Dateien hochladen' });
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                signatureBase64 = e.target.result;
+                showSignaturePreview(signatureBase64);
+            };
+            reader.readAsDataURL(file);
+        }
+
+        function showSignaturePreview(base64) {
+            const preview = document.getElementById('signature-preview');
+            const container = document.getElementById('signature-preview-container');
+            preview.src = base64;
+            container.style.display = 'block';
+        }
+
+        function clearSignature() {
+            signatureBase64 = null;
+            document.getElementById('signature-preview-container').style.display = 'none';
+            document.getElementById('signature-upload').value = '';
+            document.querySelector('#settings-modal .file-path').value = '';
+        }
+
         async function openSettings() {
             // Load current settings
             const settings = await api('/api/einstellungen');
@@ -1513,6 +1607,15 @@
                 document.getElementById('settings-name').value = settings.name || '';
                 document.getElementById('settings-firma').value = settings.firma || '';
                 document.getElementById('settings-bewirtender').value = settings.bewirtender_name || '';
+
+                // Load existing signature
+                if (settings.unterschrift_base64) {
+                    signatureBase64 = settings.unterschrift_base64;
+                    showSignaturePreview(signatureBase64);
+                } else {
+                    clearSignature();
+                }
+
                 M.updateTextFields();
             }
             M.Modal.getInstance(document.getElementById('settings-modal')).open();
@@ -1524,15 +1627,22 @@
 
         // Save settings
         async function saveSettings() {
+            const data = {
+                name: document.getElementById('settings-name').value,
+                firma: document.getElementById('settings-firma').value,
+                bewirtender_name: document.getElementById('settings-bewirtender').value,
+                auto_kategorisieren: document.getElementById('settings-auto-kat').checked,
+                auto_matching: document.getElementById('settings-auto-match').checked
+            };
+
+            // Add signature if present
+            if (signatureBase64) {
+                data.unterschrift_base64 = signatureBase64;
+            }
+
             await api('/api/einstellungen', {
                 method: 'PUT',
-                body: JSON.stringify({
-                    name: document.getElementById('settings-name').value,
-                    firma: document.getElementById('settings-firma').value,
-                    bewirtender_name: document.getElementById('settings-bewirtender').value,
-                    auto_kategorisieren: document.getElementById('settings-auto-kat').checked,
-                    auto_matching: document.getElementById('settings-auto-match').checked
-                })
+                body: JSON.stringify(data)
             });
 
             M.toast({html: 'Einstellungen gespeichert'});
@@ -1733,6 +1843,127 @@
                 a.href = pdfCurrentUrl;
                 a.download = pdfCurrentFilename || 'beleg.pdf';
                 a.click();
+            }
+        }
+
+        // ==================== Personen Management ====================
+
+        let personenList = [];
+        let editingPersonId = null;
+
+        async function openPersonenModal() {
+            await loadPersonenList();
+            M.Modal.getInstance(document.getElementById('personen-modal')).open();
+        }
+
+        async function loadPersonenList() {
+            personenList = await api('/api/personen');
+            renderPersonenList();
+        }
+
+        function renderPersonenList() {
+            const container = document.getElementById('personen-list');
+            const emptyState = document.getElementById('personen-empty');
+
+            if (personenList.length === 0) {
+                container.style.display = 'none';
+                emptyState.style.display = 'block';
+                return;
+            }
+
+            container.style.display = 'block';
+            emptyState.style.display = 'none';
+
+            container.innerHTML = personenList.map(p =>
+                `<li class="collection-item" id="person-item-${p.id}">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span>
+                            <strong>${p.name}</strong>
+                            ${p.firma ? '<span class="grey-text"> - ' + p.firma + '</span>' : ''}
+                        </span>
+                        <span>
+                            <a class="btn-flat btn-small" onclick="editPerson(${p.id})">
+                                <i class="material-icons grey-text">edit</i>
+                            </a>
+                            <a class="btn-flat btn-small" onclick="deletePerson(${p.id})">
+                                <i class="material-icons grey-text">delete</i>
+                            </a>
+                        </span>
+                    </div>
+                </li>`
+            ).join('');
+        }
+
+        async function savePersonFromModal() {
+            const nameInput = document.getElementById('person-name');
+            const firmaInput = document.getElementById('person-firma');
+
+            const name = nameInput.value.trim();
+            const firma = firmaInput.value.trim();
+
+            if (!name) {
+                M.toast({ html: 'Bitte Name eingeben' });
+                return;
+            }
+
+            if (editingPersonId) {
+                // Update existing
+                await api(`/api/personen/${editingPersonId}`, {
+                    method: 'PUT',
+                    body: JSON.stringify({ name, firma })
+                });
+                M.toast({ html: 'Person aktualisiert' });
+                editingPersonId = null;
+            } else {
+                // Create new
+                await api('/api/personen', {
+                    method: 'POST',
+                    body: JSON.stringify({ name, firma })
+                });
+                M.toast({ html: 'Person hinzugefügt' });
+            }
+
+            // Clear form
+            nameInput.value = '';
+            firmaInput.value = '';
+
+            // Reload list
+            await loadPersonenList();
+
+            // Also update Bewirtungsbeleg chips if that's loaded
+            if (typeof loadPersonen === 'function') {
+                loadPersonen();
+            }
+        }
+
+        function editPerson(id) {
+            const person = personenList.find(p => p.id === id);
+            if (!person) return;
+
+            editingPersonId = id;
+            document.getElementById('person-name').value = person.name;
+            document.getElementById('person-firma').value = person.firma || '';
+            M.updateTextFields();
+
+            // Scroll to top of modal
+            document.querySelector('#personen-modal .modal-content').scrollTop = 0;
+            document.getElementById('person-name').focus();
+
+            M.toast({ html: 'Person zum Bearbeiten geladen' });
+        }
+
+        async function deletePerson(id) {
+            if (!confirm('Person wirklich löschen?')) return;
+
+            await api(`/api/personen/${id}`, { method: 'DELETE' });
+            M.toast({ html: 'Person gelöscht' });
+
+            // Reload list
+            await loadPersonenList();
+
+            // Also update Bewirtungsbeleg chips
+            if (typeof loadPersonen === 'function') {
+                loadPersonen();
             }
         }
 

@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 import anthropic
 import sqlite3
 import hashlib
+import base64
 import json
 import os
 import re
@@ -180,10 +181,17 @@ def init_db():
             restaurant TEXT,
             ort TEXT,
             anlass TEXT,
-            teilnehmer TEXT,
             bewirtender_name TEXT,
             betrag REAL,
             datei_pfad TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        -- Teilnehmer für Bewirtungsbelege (n:m Relation)
+        CREATE TABLE IF NOT EXISTS bewirtungsbeleg_teilnehmer (
+            id INTEGER PRIMARY KEY,
+            bewirtungsbeleg_id INTEGER REFERENCES bewirtungsbelege(id) ON DELETE CASCADE,
+            person_id INTEGER REFERENCES personen(id),
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
 
@@ -503,6 +511,20 @@ def create_person():
     conn.commit()
     conn.close()
     return jsonify({'id': person_id, 'success': True})
+
+
+@app.route('/api/personen/<int:id>', methods=['PUT'])
+def update_person(id):
+    """Update a person."""
+    data = request.json
+    conn = get_db()
+    conn.execute(
+        'UPDATE personen SET name = ?, firma = ? WHERE id = ?',
+        (data['name'], data.get('firma'), id)
+    )
+    conn.commit()
+    conn.close()
+    return jsonify({'success': True})
 
 
 @app.route('/api/personen/<int:id>', methods=['DELETE'])
@@ -1624,6 +1646,15 @@ def export_abrechnung_zip(id):
         ORDER BY t.position ASC
     ''', (id,)).fetchall()
 
+    # Get Bewirtungsbelege for this statement
+    bewirtungsbelege = conn.execute('''
+        SELECT bw.*, t.position as transaktion_position
+        FROM bewirtungsbelege bw
+        JOIN transaktionen t ON bw.transaktion_id = t.id
+        WHERE t.abrechnung_id = ?
+        ORDER BY t.position ASC
+    ''', (id,)).fetchall()
+
     conn.close()
 
     # Create ZIP in memory
@@ -1650,7 +1681,14 @@ def export_abrechnung_zip(id):
                 # Use the already renamed filename (with position prefix)
                 add_file_utf8(zf, t['beleg_pfad'], f"Belege/{t['beleg_datei']}")
 
-        # 3. Generate and add PDF report
+        # 3. Add all Bewirtungsbelege
+        for bw in bewirtungsbelege:
+            if bw['datei_pfad'] and os.path.exists(bw['datei_pfad']):
+                # Extract filename from path
+                bw_filename = os.path.basename(bw['datei_pfad'])
+                add_file_utf8(zf, bw['datei_pfad'], f"Bewirtungsbelege/{bw_filename}")
+
+        # 4. Generate and add PDF report
         pdf_buffer = BytesIO()
         doc = SimpleDocTemplate(pdf_buffer, pagesize=landscape(A4), leftMargin=15*mm, rightMargin=15*mm, topMargin=15*mm, bottomMargin=15*mm)
 
@@ -1793,13 +1831,8 @@ def create_bewirtungsbeleg(id):
     # Get settings for bewirtender name and signature
     einst = conn.execute('SELECT * FROM einstellungen WHERE id = 1').fetchone()
 
-    # Count existing Bewirtungsbelege for numbering
-    abrechnung_id = transaktion['abrechnung_id']
-    count = conn.execute(
-        'SELECT COUNT(*) FROM bewirtungsbelege b JOIN transaktionen t ON b.transaktion_id = t.id WHERE t.abrechnung_id = ?',
-        (abrechnung_id,)
-    ).fetchone()[0]
-    beleg_nr = count + 1
+    # Use transaction position as Bewirtungsbeleg number
+    beleg_nr = transaktion['position'] or 1
 
     # Parse data
     datum = data.get('datum', transaktion['datum'])
@@ -1955,11 +1988,30 @@ def create_bewirtungsbeleg(id):
     with open(filepath, 'wb') as f:
         f.write(pdf_data)
 
-    # Save record
-    conn.execute('''
-        INSERT INTO bewirtungsbelege (transaktion_id, beleg_nr, datum, restaurant, ort, anlass, teilnehmer, bewirtender_name, betrag, datei_pfad)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ''', (id, beleg_nr, datum, restaurant, ort, anlass, json.dumps(teilnehmer), bewirtender_name, betrag, filepath))
+    # Save Bewirtungsbeleg record
+    cursor = conn.execute('''
+        INSERT INTO bewirtungsbelege (transaktion_id, beleg_nr, datum, restaurant, ort, anlass, bewirtender_name, betrag, datei_pfad)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (id, beleg_nr, datum, restaurant, ort, anlass, bewirtender_name, betrag, filepath))
+    bewirtungsbeleg_id = cursor.lastrowid
+
+    # Save teilnehmer relations
+    for t in teilnehmer:
+        # Find or create person
+        person = conn.execute('SELECT id FROM personen WHERE name = ?', (t['name'],)).fetchone()
+        if person:
+            person_id = person['id']
+            # Update firma if provided
+            if t.get('firma'):
+                conn.execute('UPDATE personen SET firma = ? WHERE id = ?', (t['firma'], person_id))
+        else:
+            cursor = conn.execute('INSERT INTO personen (name, firma) VALUES (?, ?)', (t['name'], t.get('firma')))
+            person_id = cursor.lastrowid
+
+        # Link to Bewirtungsbeleg
+        conn.execute('INSERT INTO bewirtungsbeleg_teilnehmer (bewirtungsbeleg_id, person_id) VALUES (?, ?)',
+                     (bewirtungsbeleg_id, person_id))
+
     conn.commit()
     conn.close()
 
@@ -1974,14 +2026,27 @@ def create_bewirtungsbeleg(id):
 
 @app.route('/api/transaktionen/<int:id>/bewirtungsbeleg', methods=['GET'])
 def get_bewirtungsbeleg(id):
-    """Get existing Bewirtungsbeleg for a transaction."""
+    """Get existing Bewirtungsbeleg for a transaction with participants."""
     conn = get_db()
     beleg = conn.execute('SELECT * FROM bewirtungsbelege WHERE transaktion_id = ?', (id,)).fetchone()
+
+    if not beleg:
+        conn.close()
+        return jsonify(None)
+
+    # Get teilnehmer from junction table
+    teilnehmer = conn.execute('''
+        SELECT p.id, p.name, p.firma
+        FROM bewirtungsbeleg_teilnehmer bt
+        JOIN personen p ON bt.person_id = p.id
+        WHERE bt.bewirtungsbeleg_id = ?
+        ORDER BY p.name
+    ''', (beleg['id'],)).fetchall()
     conn.close()
 
-    if beleg:
-        return jsonify(dict(beleg))
-    return jsonify(None)
+    result = dict(beleg)
+    result['teilnehmer'] = [dict(t) for t in teilnehmer]
+    return jsonify(result)
 
 
 # =============================================================================
