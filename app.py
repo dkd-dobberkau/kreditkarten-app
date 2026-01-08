@@ -1066,56 +1066,60 @@ def kategorisiere_transaktion_api(id):
 @app.route('/api/transaktionen/kategorisieren-alle', methods=['POST'])
 def kategorisiere_alle():
     """Auto-categorize all uncategorized transactions in a statement using batch processing."""
-    abrechnung_id = request.json.get('abrechnung_id')
-    batch_size = 15  # Process 15 transactions per API call
+    try:
+        abrechnung_id = request.json.get('abrechnung_id')
+        batch_size = 15  # Process 15 transactions per API call
 
-    conn = get_db()
-    transaktionen = conn.execute('''
-        SELECT * FROM transaktionen
-        WHERE abrechnung_id = ? AND (kategorie IS NULL OR kategorie = '')
-        ORDER BY position
-    ''', (abrechnung_id,)).fetchall()
+        conn = get_db()
+        transaktionen = conn.execute('''
+            SELECT * FROM transaktionen
+            WHERE abrechnung_id = ? AND (kategorie IS NULL OR kategorie = '')
+            ORDER BY position
+        ''', (abrechnung_id,)).fetchall()
 
-    if not transaktionen:
+        if not transaktionen:
+            conn.close()
+            return jsonify({'success': True, 'kategorisiert': 0, 'ergebnisse': []})
+
+        results = []
+
+        # Process in batches
+        for i in range(0, len(transaktionen), batch_size):
+            batch = transaktionen[i:i + batch_size]
+
+            # Prepare batch data
+            batch_data = [{
+                'id': t['id'],
+                'datum': t['datum'],
+                'beschreibung': t['beschreibung'],
+                'betrag': t['betrag_eur'] or t['betrag']
+            } for t in batch]
+
+            # Categorize batch
+            batch_results = kategorisiere_batch(batch_data)
+
+            # Update database and collect results
+            for t, result in zip(batch, batch_results):
+                conn.execute('''
+                    UPDATE transaktionen
+                    SET haendler = ?, kategorie = ?, kategorie_confidence = ?, notizen = ?
+                    WHERE id = ?
+                ''', (
+                    result.get('haendler'),
+                    result.get('kategorie'),
+                    result.get('confidence'),
+                    result.get('notiz'),
+                    t['id']
+                ))
+                results.append({'id': t['id'], **result})
+
+        conn.commit()
         conn.close()
-        return jsonify({'success': True, 'kategorisiert': 0, 'ergebnisse': []})
 
-    results = []
+        return jsonify({'success': True, 'kategorisiert': len(results), 'ergebnisse': results})
 
-    # Process in batches
-    for i in range(0, len(transaktionen), batch_size):
-        batch = transaktionen[i:i + batch_size]
-
-        # Prepare batch data
-        batch_data = [{
-            'id': t['id'],
-            'datum': t['datum'],
-            'beschreibung': t['beschreibung'],
-            'betrag': t['betrag_eur'] or t['betrag']
-        } for t in batch]
-
-        # Categorize batch
-        batch_results = kategorisiere_batch(batch_data)
-
-        # Update database and collect results
-        for t, result in zip(batch, batch_results):
-            conn.execute('''
-                UPDATE transaktionen
-                SET haendler = ?, kategorie = ?, kategorie_confidence = ?, notizen = ?
-                WHERE id = ?
-            ''', (
-                result.get('haendler'),
-                result.get('kategorie'),
-                result.get('confidence'),
-                result.get('notiz'),
-                t['id']
-            ))
-            results.append({'id': t['id'], **result})
-
-    conn.commit()
-    conn.close()
-
-    return jsonify({'success': True, 'kategorisiert': len(results), 'ergebnisse': results})
+    except Exception as e:
+        return jsonify({'error': f'Kategorisierung fehlgeschlagen: {str(e)}'}), 500
 
 
 # --- Belege ---

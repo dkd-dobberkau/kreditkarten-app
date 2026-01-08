@@ -736,7 +736,19 @@
                 headers: { 'Content-Type': 'application/json' },
                 ...options
             });
-            return response.json();
+
+            const contentType = response.headers.get('content-type');
+            if (!contentType || !contentType.includes('application/json')) {
+                throw new Error(`Server-Fehler (${response.status}): Keine JSON-Antwort`);
+            }
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(data.error || `HTTP ${response.status}`);
+            }
+
+            return data;
         }
 
         // Load accounts
