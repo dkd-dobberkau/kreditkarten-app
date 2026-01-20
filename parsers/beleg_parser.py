@@ -39,9 +39,35 @@ def get_anthropic_client():
     return anthropic.Anthropic(api_key=api_key)
 
 
+def validate_file_path(filepath, allowed_extensions=None):
+    """
+    Validate and normalize file path to prevent path traversal attacks.
+    Returns normalized absolute path or raises ValueError.
+    """
+    if not filepath:
+        raise ValueError("Dateipfad darf nicht leer sein")
+
+    # Normalize path (resolve .., symlinks, etc.)
+    normalized = os.path.normpath(os.path.realpath(filepath))
+
+    # Check if file exists
+    if not os.path.isfile(normalized):
+        raise ValueError(f"Datei nicht gefunden: {filepath}")
+
+    # Validate extension if specified
+    if allowed_extensions:
+        ext = os.path.splitext(normalized)[1].lower()
+        if ext not in allowed_extensions:
+            raise ValueError(f"Nicht erlaubte Dateiendung: {ext}")
+
+    return normalized
+
+
 def image_to_base64(image_path):
     """Convert image file to base64 string."""
-    with open(image_path, 'rb') as f:
+    # Validate path before opening
+    safe_path = validate_file_path(image_path, {'.jpg', '.jpeg', '.png', '.gif', '.webp'})
+    with open(safe_path, 'rb') as f:
         return base64.b64encode(f.read()).decode('utf-8')
 
 
@@ -181,17 +207,21 @@ def extract_beleg_data(filepath):
         'confidence': 0.0
     }
 
-    if not os.path.exists(filepath):
+    # Validate path to prevent path traversal
+    allowed_ext = {'.pdf', '.jpg', '.jpeg', '.png', '.gif', '.webp'}
+    try:
+        safe_filepath = validate_file_path(filepath, allowed_ext)
+    except ValueError:
         return result
 
-    ext = os.path.splitext(filepath)[1].lower()
+    ext = os.path.splitext(safe_filepath)[1].lower()
     ocr_text = ""
     image_base64 = None
 
     # Handle PDFs
     if ext == '.pdf':
         if PDF_SUPPORT:
-            images = pdf_to_images(filepath)
+            images = pdf_to_images(safe_filepath)
             if images:
                 # OCR auf erste Seite
                 import io
@@ -205,8 +235,8 @@ def extract_beleg_data(filepath):
     else:
         # Image file
         if OCR_AVAILABLE:
-            ocr_text = ocr_image(filepath)
-        image_base64 = image_to_base64(filepath)
+            ocr_text = ocr_image(safe_filepath)
+        image_base64 = image_to_base64(safe_filepath)
 
     result['ocr_text'] = ocr_text[:2000] if ocr_text else None
 

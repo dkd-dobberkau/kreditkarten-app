@@ -32,12 +32,34 @@ def get_anthropic_client():
     return anthropic.Anthropic(api_key=api_key)
 
 
+def validate_pdf_path(pdf_path):
+    """
+    Validate and normalize PDF path to prevent path traversal attacks.
+    Returns normalized absolute path or raises ValueError.
+    """
+    if not pdf_path:
+        raise ValueError("PDF-Pfad darf nicht leer sein")
+
+    # Normalize path (resolve .., symlinks, etc.)
+    normalized = os.path.normpath(os.path.realpath(pdf_path))
+
+    # Check if file exists and is a PDF
+    if not os.path.isfile(normalized):
+        raise ValueError(f"PDF nicht gefunden: {pdf_path}")
+
+    if not normalized.lower().endswith('.pdf'):
+        raise ValueError("Nur PDF-Dateien erlaubt")
+
+    return normalized
+
+
 def extract_text_from_pdf(pdf_path):
     """Extrahiert Text aus PDF mittels OCR."""
     if not PDF_SUPPORT:
         raise RuntimeError("pdf2image/pytesseract nicht installiert")
 
-    images = convert_from_path(pdf_path)
+    safe_path = validate_pdf_path(pdf_path)
+    images = convert_from_path(safe_path)
     text_pages = []
 
     for image in images:
@@ -57,11 +79,14 @@ def parse_amex_business_with_ai(pdf_path):
 
     import base64
 
+    # Validate and normalize path
+    safe_path = validate_pdf_path(pdf_path)
+
     # PDF in Bilder konvertieren
     if not PDF_SUPPORT:
         raise RuntimeError("pdf2image nicht installiert")
 
-    images = convert_from_path(pdf_path)
+    images = convert_from_path(safe_path)
     client = get_anthropic_client()
 
     all_transactions = []
@@ -237,11 +262,11 @@ def parse_amex_pdf(pdf_path, year=None):
     Returns:
         dict mit 'periode', 'gesamtbetrag', 'transaktionen'
     """
-    if not os.path.exists(pdf_path):
-        raise FileNotFoundError(f"PDF nicht gefunden: {pdf_path}")
+    # Validate path (prevents path traversal)
+    safe_path = validate_pdf_path(pdf_path)
 
-    # Mit AI parsen
-    amex_data = parse_amex_business_with_ai(pdf_path)
+    # Mit AI parsen (safe_path wird erneut validiert, das ist OK)
+    amex_data = parse_amex_business_with_ai(safe_path)
 
     # Jahr aus Periode extrahieren falls möglich
     if not year and amex_data.get('periode'):

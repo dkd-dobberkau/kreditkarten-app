@@ -3,6 +3,7 @@ Kreditkarten-Abgleich App - Flask Backend
 """
 
 from flask import Flask, render_template, request, jsonify, send_file
+from werkzeug.utils import secure_filename
 from datetime import datetime
 from cryptography.fernet import Fernet
 from dotenv import load_dotenv
@@ -575,6 +576,8 @@ def get_konten():
 def create_konto():
     """Create a new credit card account."""
     data = request.json
+    if not data or not data.get('name'):
+        return jsonify({'error': 'Name ist erforderlich'}), 400
     conn = get_db()
 
     kartennummer = None
@@ -794,9 +797,12 @@ def upload_abrechnung_pdf(id):
         conn.close()
         return jsonify({'error': 'Abrechnung nicht gefunden'}), 404
 
-    # Save PDF
+    # Save PDF (secure_filename prevents path traversal)
     content = file.read()
-    safe_filename = file.filename.replace('/', '_').replace('\\', '_')
+    safe_filename = secure_filename(file.filename)
+    if not safe_filename:
+        conn.close()
+        return jsonify({'error': 'Ungültiger Dateiname'}), 400
     filepath = os.path.join(IMPORTS_DIR, 'archiv', safe_filename)
 
     counter = 1
@@ -888,8 +894,10 @@ def import_abrechnung():
 
     # Parse based on file type
     if filename.endswith('.pdf'):
-        # Save PDF permanently
-        safe_filename = original_filename.replace('/', '_').replace('\\', '_')
+        # Save PDF permanently (secure_filename prevents path traversal)
+        safe_filename = secure_filename(original_filename)
+        if not safe_filename:
+            return jsonify({'error': 'Ungültiger Dateiname'}), 400
         saved_filepath = os.path.join(IMPORTS_DIR, 'archiv', safe_filename)
 
         # Handle duplicates
@@ -1226,8 +1234,11 @@ def upload_beleg():
         conn.close()
         return jsonify({'error': 'Dieser Beleg existiert bereits', 'id': existing['id']}), 409
 
-    # Save file
-    filename = file.filename
+    # Save file (secure_filename prevents path traversal)
+    filename = secure_filename(file.filename)
+    if not filename:
+        conn.close()
+        return jsonify({'error': 'Ungültiger Dateiname'}), 400
     filepath = os.path.join(BELEGE_DIR, 'inbox', filename)
 
     counter = 1
