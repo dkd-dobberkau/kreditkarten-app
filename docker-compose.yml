@@ -7,8 +7,8 @@ services:
       - ./data:/app/data
       - ./exports:/app/exports
       - ./logs:/app/logs
-      # Beleg-Ordner
-      - ./belege:/app/belege
+      # Beleg-Ordner (extern unter Documents/Finanzen)
+      - /Users/olivier/Documents/Finanzen/Kreditkarten-Belege:/app/belege
       # Import-Ordner
       - ./imports:/app/imports
     environment:
