@@ -1150,25 +1150,109 @@ def kategorisiere_alle():
 
 @app.route('/api/belege', methods=['GET'])
 def get_belege():
-    """Get all receipts, optionally unassigned only."""
-    nur_unzugeordnet = request.args.get('unzugeordnet') == 'true'
+    """Get all receipts with filters and pagination."""
+    # Filter parameters
+    konto_id = request.args.get('konto_id', type=int)
+    von = request.args.get('von')  # YYYY-MM-DD
+    bis = request.args.get('bis')  # YYYY-MM-DD
+    status = request.args.get('status')  # zugeordnet / offen / alle
+    nur_unzugeordnet = request.args.get('unzugeordnet') == 'true'  # Legacy support
+
+    # Pagination
+    limit = request.args.get('limit', type=int, default=25)
+    offset = request.args.get('offset', type=int, default=0)
+
     conn = get_db()
 
-    if nur_unzugeordnet:
-        belege = conn.execute('''
-            SELECT * FROM belege WHERE transaktion_id IS NULL
-            ORDER BY created_at DESC
-        ''').fetchall()
-    else:
-        belege = conn.execute('''
-            SELECT b.*, t.beschreibung as transaktion_beschreibung
-            FROM belege b
-            LEFT JOIN transaktionen t ON b.transaktion_id = t.id
-            ORDER BY b.created_at DESC
-        ''').fetchall()
+    # Build query with filters
+    conditions = []
+    params = []
 
+    # Status filter
+    if nur_unzugeordnet or status == 'offen':
+        conditions.append("b.transaktion_id IS NULL")
+    elif status == 'zugeordnet':
+        conditions.append("b.transaktion_id IS NOT NULL")
+
+    # Konto filter (via transaktion -> abrechnung -> konto)
+    if konto_id:
+        conditions.append("a.konto_id = ?")
+        params.append(konto_id)
+
+    # Date range filter (from extrahierte_daten JSON or transaktion datum)
+    if von:
+        conditions.append("(t.datum >= ? OR b.created_at >= ?)")
+        params.extend([von, von])
+    if bis:
+        conditions.append("(t.datum <= ? OR b.created_at <= ?)")
+        params.extend([bis, bis])
+
+    where_clause = " AND ".join(conditions) if conditions else "1=1"
+
+    # Count total
+    count_query = f'''
+        SELECT COUNT(*) FROM belege b
+        LEFT JOIN transaktionen t ON b.transaktion_id = t.id
+        LEFT JOIN abrechnungen a ON t.abrechnung_id = a.id
+        WHERE {where_clause}
+    '''
+    total = conn.execute(count_query, params).fetchone()[0]
+
+    # Get belege with details
+    query = f'''
+        SELECT
+            b.id,
+            b.datei_name,
+            b.datei_pfad,
+            b.file_hash,
+            b.extrahierte_daten,
+            b.match_confidence,
+            b.transaktion_id,
+            b.created_at,
+            t.datum,
+            t.haendler,
+            t.betrag,
+            t.beschreibung as transaktion_beschreibung,
+            a.periode,
+            k.name as konto_name
+        FROM belege b
+        LEFT JOIN transaktionen t ON b.transaktion_id = t.id
+        LEFT JOIN abrechnungen a ON t.abrechnung_id = a.id
+        LEFT JOIN konten k ON a.konto_id = k.id
+        WHERE {where_clause}
+        ORDER BY COALESCE(t.datum, b.created_at) DESC
+        LIMIT ? OFFSET ?
+    '''
+    params.extend([limit, offset])
+    belege_raw = conn.execute(query, params).fetchall()
     conn.close()
-    return jsonify([dict(b) for b in belege])
+
+    # Format response
+    belege = []
+    for b in belege_raw:
+        beleg = dict(b)
+        # Parse extrahierte_daten if available
+        if beleg.get('extrahierte_daten'):
+            try:
+                extracted = json.loads(beleg['extrahierte_daten'])
+                beleg['extracted_betrag'] = extracted.get('betrag')
+                beleg['extracted_datum'] = extracted.get('datum')
+                beleg['extracted_haendler'] = extracted.get('haendler')
+            except json.JSONDecodeError:
+                pass
+        # Determine display values (prefer transaktion data, fallback to extracted)
+        beleg['display_datum'] = beleg.get('datum') or beleg.get('extracted_datum') or beleg.get('created_at', '')[:10]
+        beleg['display_haendler'] = beleg.get('haendler') or beleg.get('extracted_haendler') or beleg.get('datei_name', '')
+        beleg['display_betrag'] = beleg.get('betrag') or beleg.get('extracted_betrag')
+        beleg['status'] = 'zugeordnet' if beleg.get('transaktion_id') else 'offen'
+        belege.append(beleg)
+
+    return jsonify({
+        'belege': belege,
+        'total': total,
+        'limit': limit,
+        'offset': offset
+    })
 
 
 @app.route('/api/belege/<int:id>/download')

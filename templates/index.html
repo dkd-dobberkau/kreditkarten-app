@@ -226,6 +226,7 @@
             </a>
             <ul id="nav-mobile" class="right">
                 <li><a href="#" onclick="toggleDashboard()" title="Dashboard"><i class="material-icons">dashboard</i></a></li>
+                <li><a href="#" onclick="toggleBelege()" title="Belege-Übersicht"><i class="material-icons">receipt_long</i></a></li>
                 <li><a href="#" onclick="openPersonenModal()" title="Personen verwalten"><i class="material-icons">people</i></a></li>
                 <li><a href="#" onclick="openSettings()"><i class="material-icons">settings</i></a></li>
                 <li><a href="#" onclick="showHelp()"><i class="material-icons">help</i></a></li>
@@ -311,6 +312,92 @@
                             </div>
                         </div>
                     </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Belege Section (hidden by default) -->
+        <div id="belege-section" style="display: none;">
+            <div class="row">
+                <div class="col s12">
+                    <h5><i class="material-icons left">receipt_long</i>Belege-Übersicht</h5>
+                </div>
+            </div>
+            <!-- Belege Filters -->
+            <div class="row">
+                <div class="col s12 m3">
+                    <div class="input-field">
+                        <select id="belege-konto" onchange="loadBelege()">
+                            <option value="">Alle Konten</option>
+                        </select>
+                        <label>Kreditkarte</label>
+                    </div>
+                </div>
+                <div class="col s12 m2">
+                    <div class="input-field">
+                        <input type="text" id="belege-von" class="datepicker" placeholder="Von">
+                        <label for="belege-von" class="active">Von</label>
+                    </div>
+                </div>
+                <div class="col s12 m2">
+                    <div class="input-field">
+                        <input type="text" id="belege-bis" class="datepicker" placeholder="Bis">
+                        <label for="belege-bis" class="active">Bis</label>
+                    </div>
+                </div>
+                <div class="col s12 m2">
+                    <div class="input-field">
+                        <select id="belege-status" onchange="loadBelege()">
+                            <option value="">Alle</option>
+                            <option value="zugeordnet">Zugeordnet</option>
+                            <option value="offen">Nicht zugeordnet</option>
+                        </select>
+                        <label>Status</label>
+                    </div>
+                </div>
+                <div class="col s12 m3" style="padding-top: 20px;">
+                    <a class="btn waves-effect waves-light" onclick="loadBelege()">
+                        <i class="material-icons left">search</i>Filtern
+                    </a>
+                    <a class="btn-flat waves-effect" onclick="toggleBelege()">
+                        <i class="material-icons left">arrow_back</i>Zurück
+                    </a>
+                </div>
+            </div>
+            <!-- Belege Table -->
+            <div class="row">
+                <div class="col s12">
+                    <div class="card">
+                        <div class="card-content" style="padding: 0;">
+                            <table class="striped highlight">
+                                <thead>
+                                    <tr>
+                                        <th>Datum</th>
+                                        <th>Händler</th>
+                                        <th class="right-align">Betrag</th>
+                                        <th>Konto</th>
+                                        <th>Status</th>
+                                        <th class="center-align">Aktion</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="belege-table-body">
+                                    <tr>
+                                        <td colspan="6" class="center-align grey-text">
+                                            <i class="material-icons">hourglass_empty</i><br>
+                                            Lade Belege...
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <!-- Pagination -->
+            <div class="row">
+                <div class="col s12 center-align">
+                    <span id="belege-pagination-info" class="grey-text"></span>
+                    <ul class="pagination" id="belege-pagination" style="display: inline-flex; margin-left: 20px;"></ul>
                 </div>
             </div>
         </div>
@@ -968,10 +1055,12 @@
         function toggleDashboard() {
             const dashboard = document.getElementById('dashboard-section');
             const main = document.getElementById('main-section');
+            const belege = document.getElementById('belege-section');
 
             if (dashboard.style.display === 'none') {
                 dashboard.style.display = 'block';
                 main.style.display = 'none';
+                belege.style.display = 'none';
                 loadDashboard();
             } else {
                 dashboard.style.display = 'none';
@@ -1121,6 +1210,183 @@
 
         // =============================================================================
         // End Dashboard Functions
+        // =============================================================================
+
+        // =============================================================================
+        // Belege Functions
+        // =============================================================================
+
+        let belegeCurrentOffset = 0;
+        const belegeLimit = 25;
+
+        function toggleBelege() {
+            const belege = document.getElementById('belege-section');
+            const main = document.getElementById('main-section');
+            const dashboard = document.getElementById('dashboard-section');
+
+            if (belege.style.display === 'none') {
+                belege.style.display = 'block';
+                main.style.display = 'none';
+                dashboard.style.display = 'none';
+                initBelegeFilters();
+                loadBelege();
+            } else {
+                belege.style.display = 'none';
+                main.style.display = 'block';
+            }
+        }
+
+        function initBelegeFilters() {
+            // Populate konto select
+            const belegeKonto = document.getElementById('belege-konto');
+            const mainKonto = document.getElementById('konto-select');
+            belegeKonto.innerHTML = '<option value="">Alle Konten</option>' +
+                Array.from(mainKonto.options).slice(1).map(o => o.outerHTML).join('');
+            M.FormSelect.init(belegeKonto);
+
+            // Init datepickers
+            const datepickers = document.querySelectorAll('#belege-section .datepicker');
+            M.Datepicker.init(datepickers, {
+                format: 'yyyy-mm-dd',
+                autoClose: true,
+                i18n: {
+                    months: ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'],
+                    monthsShort: ['Jan', 'Feb', 'Mär', 'Apr', 'Mai', 'Jun', 'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez'],
+                    weekdays: ['Sonntag', 'Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag'],
+                    weekdaysShort: ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'],
+                    weekdaysAbbrev: ['S', 'M', 'D', 'M', 'D', 'F', 'S'],
+                    cancel: 'Abbrechen',
+                    done: 'OK'
+                }
+            });
+
+            M.FormSelect.init(document.getElementById('belege-status'));
+        }
+
+        async function loadBelege(offset = 0) {
+            belegeCurrentOffset = offset;
+            const kontoId = document.getElementById('belege-konto').value;
+            const von = document.getElementById('belege-von').value;
+            const bis = document.getElementById('belege-bis').value;
+            const status = document.getElementById('belege-status').value;
+
+            let url = `/api/belege?limit=${belegeLimit}&offset=${offset}`;
+            if (kontoId) url += `&konto_id=${kontoId}`;
+            if (von) url += `&von=${von}`;
+            if (bis) url += `&bis=${bis}`;
+            if (status) url += `&status=${status}`;
+
+            try {
+                const data = await api(url);
+                renderBelegeTable(data);
+            } catch (error) {
+                console.error('Error loading belege:', error);
+                M.toast({html: 'Fehler beim Laden der Belege'});
+            }
+        }
+
+        function renderBelegeTable(data) {
+            const tbody = document.getElementById('belege-table-body');
+
+            if (!data.belege || data.belege.length === 0) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="6" class="center-align grey-text" style="padding: 40px;">
+                            <i class="material-icons" style="font-size: 48px;">inbox</i><br>
+                            Keine Belege gefunden.
+                        </td>
+                    </tr>`;
+                document.getElementById('belege-pagination-info').textContent = '';
+                document.getElementById('belege-pagination').innerHTML = '';
+                return;
+            }
+
+            tbody.innerHTML = data.belege.map(b => {
+                const datum = b.display_datum ? formatDate(b.display_datum) : '-';
+                const haendler = b.display_haendler || '-';
+                const haendlerShort = haendler.length > 30 ? haendler.slice(0, 30) + '...' : haendler;
+                const betrag = b.display_betrag ? b.display_betrag.toLocaleString('de-DE', {style: 'currency', currency: 'EUR'}) : '-';
+                const konto = b.konto_name || '-';
+                const statusIcon = b.status === 'zugeordnet'
+                    ? '<i class="material-icons tiny green-text">check_circle</i> Zugeordnet'
+                    : '<i class="material-icons tiny orange-text">warning</i> Offen';
+
+                return `
+                    <tr>
+                        <td>${datum}</td>
+                        <td title="${haendler}">${haendlerShort}</td>
+                        <td class="right-align">${betrag}</td>
+                        <td>${konto}</td>
+                        <td>${statusIcon}</td>
+                        <td class="center-align">
+                            <a href="/api/belege/${b.id}/download" target="_blank" class="btn-flat btn-small" title="Beleg anzeigen">
+                                <i class="material-icons">visibility</i>
+                            </a>
+                        </td>
+                    </tr>`;
+            }).join('');
+
+            // Pagination info
+            const start = data.offset + 1;
+            const end = Math.min(data.offset + data.belege.length, data.total);
+            document.getElementById('belege-pagination-info').textContent =
+                `Zeige ${start}-${end} von ${data.total} Belegen`;
+
+            // Pagination controls
+            renderBelegePagination(data.total, data.offset, data.limit);
+        }
+
+        function renderBelegePagination(total, offset, limit) {
+            const pagination = document.getElementById('belege-pagination');
+            const totalPages = Math.ceil(total / limit);
+            const currentPage = Math.floor(offset / limit) + 1;
+
+            if (totalPages <= 1) {
+                pagination.innerHTML = '';
+                return;
+            }
+
+            let html = '';
+
+            // Previous
+            html += `<li class="${currentPage === 1 ? 'disabled' : 'waves-effect'}">
+                <a href="#!" onclick="${currentPage > 1 ? `loadBelege(${(currentPage - 2) * limit})` : ''}">
+                    <i class="material-icons">chevron_left</i>
+                </a>
+            </li>`;
+
+            // Page numbers (show max 5)
+            let startPage = Math.max(1, currentPage - 2);
+            let endPage = Math.min(totalPages, startPage + 4);
+            if (endPage - startPage < 4) startPage = Math.max(1, endPage - 4);
+
+            for (let i = startPage; i <= endPage; i++) {
+                html += `<li class="${i === currentPage ? 'active' : 'waves-effect'}">
+                    <a href="#!" onclick="loadBelege(${(i - 1) * limit})">${i}</a>
+                </li>`;
+            }
+
+            // Next
+            html += `<li class="${currentPage === totalPages ? 'disabled' : 'waves-effect'}">
+                <a href="#!" onclick="${currentPage < totalPages ? `loadBelege(${currentPage * limit})` : ''}">
+                    <i class="material-icons">chevron_right</i>
+                </a>
+            </li>`;
+
+            pagination.innerHTML = html;
+        }
+
+        function formatDate(dateStr) {
+            if (!dateStr) return '-';
+            const parts = dateStr.split('-');
+            if (parts.length === 3) {
+                return `${parts[2]}.${parts[1]}.${parts[0].slice(2)}`;
+            }
+            return dateStr;
+        }
+
+        // =============================================================================
+        // End Belege Functions
         // =============================================================================
 
         // Load statements for account
