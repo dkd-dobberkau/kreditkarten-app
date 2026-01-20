@@ -2,6 +2,8 @@ services:
   kreditkarten:
     build: .
     container_name: kreditkarten-app
+    ports:
+      - "5001:5000"
     volumes:
       # Persistente Daten
       - ./data:/app/data

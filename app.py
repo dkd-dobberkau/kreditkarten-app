@@ -23,17 +23,18 @@ load_dotenv()
 
 app = Flask(__name__)
 
-# Flask-RESTX API Setup
+# Flask-RESTX API Setup (nur für /api/docs und /api/statistiken)
 api = Api(app,
     version='1.0',
     title='Kreditkarten-App API',
     description='API für Kreditkarten-Abgleich und Belegverwaltung',
-    doc='/api/docs'
+    doc='/api/docs',
+    prefix='/api'  # Wichtig: API nur unter /api/* registrieren
 )
 
 # API Namespaces
 statistiken_ns = Namespace('statistiken', description='Dashboard-Statistiken')
-api.add_namespace(statistiken_ns, path='/api/statistiken')
+api.add_namespace(statistiken_ns, path='/statistiken')  # wird zu /api/statistiken durch prefix
 
 # Directories
 DATA_DIR = os.environ.get('DATA_DIR', os.path.join(os.path.dirname(__file__), 'data'))
