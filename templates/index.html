@@ -7,6 +7,8 @@
     <!-- Materialize CSS -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/css/materialize.min.css">
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <style>
         :root {
             --primary-color: #1565c0;
@@ -223,14 +225,98 @@
                 Kreditkarten-Abgleich
             </a>
             <ul id="nav-mobile" class="right">
+                <li><a href="#" onclick="toggleDashboard()" title="Dashboard"><i class="material-icons">dashboard</i></a></li>
                 <li><a href="#" onclick="openPersonenModal()" title="Personen verwalten"><i class="material-icons">people</i></a></li>
                 <li><a href="#" onclick="openSettings()"><i class="material-icons">settings</i></a></li>
                 <li><a href="#" onclick="showHelp()"><i class="material-icons">help</i></a></li>
+                <li><a href="/api/docs" target="_blank" title="API Dokumentation"><i class="material-icons">code</i></a></li>
             </ul>
         </div>
     </nav>
 
     <div class="container" style="margin-top: 20px;">
+        <!-- Dashboard Section (hidden by default) -->
+        <div id="dashboard-section" style="display: none;">
+            <div class="row">
+                <div class="col s12">
+                    <h5><i class="material-icons left">dashboard</i>Dashboard</h5>
+                </div>
+            </div>
+            <!-- Dashboard Filters -->
+            <div class="row">
+                <div class="col s12 m3">
+                    <div class="input-field">
+                        <select id="dashboard-konto" onchange="loadDashboard()">
+                            <option value="">Alle Konten</option>
+                        </select>
+                        <label>Kreditkarte</label>
+                    </div>
+                </div>
+                <div class="col s12 m3">
+                    <div class="input-field">
+                        <select id="dashboard-jahr" onchange="loadDashboard()">
+                            <option value="">Alle Jahre</option>
+                        </select>
+                        <label>Jahr</label>
+                    </div>
+                </div>
+                <div class="col s12 m3">
+                    <div class="input-field">
+                        <select id="dashboard-monate" onchange="loadDashboard()">
+                            <option value="3">Letzte 3 Monate</option>
+                            <option value="6">Letzte 6 Monate</option>
+                            <option value="12" selected>Letzte 12 Monate</option>
+                            <option value="24">Letzte 24 Monate</option>
+                        </select>
+                        <label>Zeitraum</label>
+                    </div>
+                </div>
+                <div class="col s12 m3" style="padding-top: 20px;">
+                    <a class="btn-flat waves-effect" onclick="toggleDashboard()">
+                        <i class="material-icons left">arrow_back</i>Zurück
+                    </a>
+                </div>
+            </div>
+            <!-- Charts Row 1 -->
+            <div class="row">
+                <div class="col s12 m5">
+                    <div class="card">
+                        <div class="card-content">
+                            <span class="card-title">Ausgaben nach Kategorie</span>
+                            <div style="position: relative; height: 300px;">
+                                <canvas id="chart-kategorien"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col s12 m7">
+                    <div class="card">
+                        <div class="card-content">
+                            <span class="card-title">Monatlicher Verlauf</span>
+                            <div style="position: relative; height: 300px;">
+                                <canvas id="chart-monatlich"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <!-- Charts Row 2 -->
+            <div class="row">
+                <div class="col s12">
+                    <div class="card">
+                        <div class="card-content">
+                            <span class="card-title">Top 10 Händler</span>
+                            <div style="position: relative; height: 300px;">
+                                <canvas id="chart-haendler"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Content Section -->
+        <div id="main-section">
         <!-- Controls -->
         <div class="row">
             <div class="col s12 m4">
@@ -286,6 +372,40 @@
                 <div class="card stats-card">
                     <div class="stats-value" id="stat-summe">0 €</div>
                     <div class="stats-label">Gesamt</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Mini Statistics for current statement -->
+        <div class="row" id="mini-stats-row" style="display: none;">
+            <div class="col s12 m4">
+                <div class="card">
+                    <div class="card-content" style="padding: 12px 16px;">
+                        <span class="card-title" style="font-size: 1rem; margin-bottom: 8px;">
+                            <i class="material-icons left" style="font-size: 1.2rem;">pie_chart</i>Kategorien
+                        </span>
+                        <div id="mini-kategorien" style="font-size: 0.9rem;"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="col s12 m4">
+                <div class="card">
+                    <div class="card-content" style="padding: 12px 16px;">
+                        <span class="card-title" style="font-size: 1rem; margin-bottom: 8px;">
+                            <i class="material-icons left" style="font-size: 1.2rem;">store</i>Top Händler
+                        </span>
+                        <div id="mini-haendler" style="font-size: 0.9rem;"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="col s12 m4">
+                <div class="card">
+                    <div class="card-content" style="padding: 12px 16px;">
+                        <span class="card-title" style="font-size: 1rem; margin-bottom: 8px;">
+                            <i class="material-icons left" style="font-size: 1.2rem;">receipt</i>Beleg-Status
+                        </span>
+                        <div id="mini-status" style="font-size: 0.9rem;"></div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -352,6 +472,7 @@
                 </div>
             </div>
         </div>
+        </div><!-- End main-section -->
     </div>
 
     <!-- Import Modal -->
@@ -810,14 +931,197 @@
             const konten = await api('/api/konten');
             const select = document.getElementById('konto-select');
             const importSelect = document.getElementById('import-konto');
+            const dashboardSelect = document.getElementById('dashboard-konto');
 
             const options = konten.map(k => `<option value="${k.id}">${k.name}</option>`).join('');
             select.innerHTML = '<option value="">Konto wählen...</option>' + options;
             importSelect.innerHTML = '<option value="">Konto wählen...</option>' + options;
+            dashboardSelect.innerHTML = '<option value="">Alle Konten</option>' + options;
 
             M.FormSelect.init(select);
             M.FormSelect.init(importSelect);
+            M.FormSelect.init(dashboardSelect);
+
+            // Populate dashboard year select
+            initDashboardYears();
         }
+
+        // =============================================================================
+        // Dashboard Functions
+        // =============================================================================
+
+        let chartKategorien = null;
+        let chartMonatlich = null;
+        let chartHaendler = null;
+
+        function initDashboardYears() {
+            const select = document.getElementById('dashboard-jahr');
+            const currentYear = new Date().getFullYear();
+            let options = '<option value="">Alle Jahre</option>';
+            for (let y = currentYear; y >= currentYear - 5; y--) {
+                options += `<option value="${y}">${y}</option>`;
+            }
+            select.innerHTML = options;
+            M.FormSelect.init(select);
+        }
+
+        function toggleDashboard() {
+            const dashboard = document.getElementById('dashboard-section');
+            const main = document.getElementById('main-section');
+
+            if (dashboard.style.display === 'none') {
+                dashboard.style.display = 'block';
+                main.style.display = 'none';
+                loadDashboard();
+            } else {
+                dashboard.style.display = 'none';
+                main.style.display = 'block';
+            }
+        }
+
+        async function loadDashboard() {
+            const kontoId = document.getElementById('dashboard-konto').value;
+            const jahr = document.getElementById('dashboard-jahr').value;
+            const monate = document.getElementById('dashboard-monate').value;
+
+            let url = '/api/statistiken?';
+            if (kontoId) url += `konto_id=${kontoId}&`;
+            if (jahr) url += `jahr=${jahr}&`;
+            url += `monate=${monate}`;
+
+            try {
+                const data = await api(url);
+                renderCharts(data);
+            } catch (error) {
+                console.error('Dashboard load error:', error);
+                M.toast({html: 'Fehler beim Laden der Statistiken'});
+            }
+        }
+
+        function renderCharts(data) {
+            // Color palette
+            const colors = [
+                '#1976d2', '#388e3c', '#f57c00', '#7b1fa2',
+                '#c2185b', '#0097a7', '#689f38', '#5d4037',
+                '#455a64', '#e64a19'
+            ];
+
+            // 1. Categories Pie Chart
+            const kategorienCtx = document.getElementById('chart-kategorien').getContext('2d');
+            if (chartKategorien) chartKategorien.destroy();
+
+            chartKategorien = new Chart(kategorienCtx, {
+                type: 'doughnut',
+                data: {
+                    labels: data.kategorien.map(k => k.label),
+                    datasets: [{
+                        data: data.kategorien.map(k => k.summe),
+                        backgroundColor: colors.slice(0, data.kategorien.length)
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'right',
+                            labels: { boxWidth: 12 }
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: (ctx) => `${ctx.label}: ${ctx.raw.toLocaleString('de-DE', {style: 'currency', currency: 'EUR'})}`
+                            }
+                        }
+                    }
+                }
+            });
+
+            // 2. Monthly Line Chart
+            const monatlichCtx = document.getElementById('chart-monatlich').getContext('2d');
+            if (chartMonatlich) chartMonatlich.destroy();
+
+            chartMonatlich = new Chart(monatlichCtx, {
+                type: 'line',
+                data: {
+                    labels: data.monatlich.map(m => {
+                        const [year, month] = m.monat.split('-');
+                        return `${month}/${year.slice(2)}`;
+                    }),
+                    datasets: [{
+                        label: 'Ausgaben',
+                        data: data.monatlich.map(m => m.summe),
+                        borderColor: '#1976d2',
+                        backgroundColor: 'rgba(25, 118, 210, 0.1)',
+                        fill: true,
+                        tension: 0.3
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: (ctx) => ctx.raw.toLocaleString('de-DE', {style: 'currency', currency: 'EUR'})
+                            }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                callback: (value) => value.toLocaleString('de-DE') + ' €'
+                            }
+                        }
+                    }
+                }
+            });
+
+            // 3. Top Merchants Horizontal Bar Chart
+            const haendlerCtx = document.getElementById('chart-haendler').getContext('2d');
+            if (chartHaendler) chartHaendler.destroy();
+
+            chartHaendler = new Chart(haendlerCtx, {
+                type: 'bar',
+                data: {
+                    labels: data.haendler.map(h => h.name.length > 25 ? h.name.slice(0, 25) + '...' : h.name),
+                    datasets: [{
+                        label: 'Umsatz',
+                        data: data.haendler.map(h => h.summe),
+                        backgroundColor: '#1976d2'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    indexAxis: 'y',
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: (ctx) => {
+                                    const h = data.haendler[ctx.dataIndex];
+                                    return `${h.summe.toLocaleString('de-DE', {style: 'currency', currency: 'EUR'})} (${h.anzahl}x)`;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            beginAtZero: true,
+                            ticks: {
+                                callback: (value) => value.toLocaleString('de-DE') + ' €'
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // =============================================================================
+        // End Dashboard Functions
+        // =============================================================================
 
         // Load statements for account
         async function loadAbrechnungen() {
@@ -841,6 +1145,7 @@
             const abrechnungId = document.getElementById('abrechnung-select').value;
             if (!abrechnungId) {
                 document.getElementById('stats-row').style.display = 'none';
+                document.getElementById('mini-stats-row').style.display = 'none';
                 document.getElementById('view-abrechnung-btn').style.display = 'none';
                 return;
             }
@@ -872,8 +1177,77 @@
             document.getElementById('export-list-btn').style.display = 'inline-block';
             document.getElementById('export-zip-btn').style.display = 'inline-block';
 
-            // Load transactions
+            // Load transactions and mini-stats
             loadTransaktionen(abrechnungId);
+            document.getElementById('mini-stats-row').style.display = 'flex';
+        }
+
+        // Calculate and display mini-stats for current statement
+        function updateMiniStats(transaktionen) {
+            // 1. Category breakdown
+            const kategorien = {};
+            let total = 0;
+            transaktionen.forEach(t => {
+                const kat = t.kategorie || 'sonstiges';
+                kategorien[kat] = (kategorien[kat] || 0) + Math.abs(t.betrag);
+                total += Math.abs(t.betrag);
+            });
+
+            const sortedKat = Object.entries(kategorien)
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 4);
+
+            const katHtml = sortedKat.map(([name, summe]) => {
+                const prozent = total > 0 ? Math.round((summe / total) * 100) : 0;
+                const label = name.replace('_', ' ').replace(/^\w/, c => c.toUpperCase());
+                return `<div style="display: flex; justify-content: space-between; margin: 4px 0;">
+                    <span>${label}</span>
+                    <span class="grey-text">${prozent}%</span>
+                </div>`;
+            }).join('');
+            document.getElementById('mini-kategorien').innerHTML = katHtml || '<span class="grey-text">Keine Daten</span>';
+
+            // 2. Top merchants
+            const haendler = {};
+            transaktionen.forEach(t => {
+                if (t.haendler) {
+                    haendler[t.haendler] = (haendler[t.haendler] || 0) + Math.abs(t.betrag);
+                }
+            });
+
+            const sortedHaendler = Object.entries(haendler)
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 3);
+
+            const haendlerHtml = sortedHaendler.map(([name, summe]) => {
+                const shortName = name.length > 20 ? name.slice(0, 20) + '...' : name;
+                return `<div style="display: flex; justify-content: space-between; margin: 4px 0;">
+                    <span>${shortName}</span>
+                    <span class="grey-text">${summe.toFixed(0)} €</span>
+                </div>`;
+            }).join('');
+            document.getElementById('mini-haendler').innerHTML = haendlerHtml || '<span class="grey-text">Keine Daten</span>';
+
+            // 3. Receipt status
+            const mitBeleg = transaktionen.filter(t => t.status === 'zugeordnet').length;
+            const ohneBeleg = transaktionen.filter(t => t.status === 'offen').length;
+            const ignoriert = transaktionen.filter(t => t.status === 'ignoriert').length;
+
+            const statusHtml = `
+                <div style="display: flex; justify-content: space-between; margin: 4px 0;">
+                    <span><i class="material-icons tiny green-text">check_circle</i> Mit Beleg</span>
+                    <span>${mitBeleg}</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; margin: 4px 0;">
+                    <span><i class="material-icons tiny orange-text">warning</i> Ohne Beleg</span>
+                    <span>${ohneBeleg}</span>
+                </div>
+                ${ignoriert > 0 ? `<div style="display: flex; justify-content: space-between; margin: 4px 0;">
+                    <span><i class="material-icons tiny grey-text">block</i> Ignoriert</span>
+                    <span>${ignoriert}</span>
+                </div>` : ''}
+            `;
+            document.getElementById('mini-status').innerHTML = statusHtml;
         }
 
         // Export transaction list as PDF
@@ -917,6 +1291,7 @@
                 // Reset UI
                 document.getElementById('abrechnung-select').value = '';
                 document.getElementById('stats-row').style.display = 'none';
+                document.getElementById('mini-stats-row').style.display = 'none';
                 document.getElementById('delete-abrechnung-btn').style.display = 'none';
                 document.getElementById('view-abrechnung-btn').style.display = 'none';
                 document.getElementById('upload-abrechnung-btn').style.display = 'none';
@@ -974,6 +1349,7 @@
         async function loadTransaktionen(abrechnungId) {
             transaktionen = await api(`/api/transaktionen?abrechnung_id=${abrechnungId}`);
             renderTransaktionen();
+            updateMiniStats(transaktionen);
         }
 
         // Render transactions grouped by category

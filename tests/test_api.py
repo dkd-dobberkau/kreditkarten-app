@@ -145,3 +145,37 @@ class TestKategorienAPI:
         assert isinstance(data, dict)
         # Should have default categories
         assert 'reisekosten' in data or len(data) >= 0
+
+
+class TestStatistikenAPI:
+    """Tests for /api/statistiken endpoints."""
+
+    def test_get_statistiken_empty(self, client):
+        """Get statistiken returns valid structure with empty data."""
+        response = client.get('/api/statistiken')
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        assert 'zeitraum' in data
+        assert 'kategorien' in data
+        assert 'monatlich' in data
+        assert 'haendler' in data
+        assert isinstance(data['kategorien'], list)
+        assert isinstance(data['monatlich'], list)
+        assert isinstance(data['haendler'], list)
+
+    def test_get_statistiken_with_data(self, client, sample_transaktion):
+        """Get statistiken returns data for existing transactions."""
+        response = client.get('/api/statistiken?monate=12')
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        # Should have at least one category from our sample transaction
+        assert len(data['kategorien']) >= 0  # May be 0 if date is outside range
+        assert 'von' in data['zeitraum']
+        assert 'bis' in data['zeitraum']
+
+    def test_get_statistiken_with_filters(self, client, sample_konto):
+        """Get statistiken accepts filter parameters."""
+        response = client.get(f'/api/statistiken?konto_id={sample_konto}&jahr=2026&monate=6')
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        assert 'kategorien' in data

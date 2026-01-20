@@ -3,6 +3,7 @@ Kreditkarten-Abgleich App - Flask Backend
 """
 
 from flask import Flask, render_template, request, jsonify, send_file
+from flask_restx import Api, Namespace, Resource, fields
 from werkzeug.utils import secure_filename
 from datetime import datetime
 from cryptography.fernet import Fernet
@@ -21,6 +22,18 @@ import glob as glob_module
 load_dotenv()
 
 app = Flask(__name__)
+
+# Flask-RESTX API Setup
+api = Api(app,
+    version='1.0',
+    title='Kreditkarten-App API',
+    description='API für Kreditkarten-Abgleich und Belegverwaltung',
+    doc='/api/docs'
+)
+
+# API Namespaces
+statistiken_ns = Namespace('statistiken', description='Dashboard-Statistiken')
+api.add_namespace(statistiken_ns, path='/api/statistiken')
 
 # Directories
 DATA_DIR = os.environ.get('DATA_DIR', os.path.join(os.path.dirname(__file__), 'data'))
@@ -2384,6 +2397,149 @@ def get_handbuch_pdf():
         as_attachment=True,
         download_name='Kreditkarten-App_Benutzerhandbuch.pdf'
     )
+
+
+# =============================================================================
+# Flask-RESTX API Endpoints
+# =============================================================================
+
+# API Models für Swagger-Dokumentation
+kategorie_stat_model = api.model('KategorieStat', {
+    'name': fields.String(description='Kategorie-Schlüssel'),
+    'label': fields.String(description='Anzeigename'),
+    'summe': fields.Float(description='Gesamtbetrag'),
+    'anzahl': fields.Integer(description='Anzahl Transaktionen')
+})
+
+monat_stat_model = api.model('MonatStat', {
+    'monat': fields.String(description='Monat im Format YYYY-MM'),
+    'summe': fields.Float(description='Gesamtbetrag')
+})
+
+haendler_stat_model = api.model('HaendlerStat', {
+    'name': fields.String(description='Händlername'),
+    'summe': fields.Float(description='Gesamtbetrag'),
+    'anzahl': fields.Integer(description='Anzahl Transaktionen')
+})
+
+statistiken_model = api.model('Statistiken', {
+    'zeitraum': fields.Nested(api.model('Zeitraum', {
+        'von': fields.String(description='Startdatum'),
+        'bis': fields.String(description='Enddatum')
+    })),
+    'kategorien': fields.List(fields.Nested(kategorie_stat_model)),
+    'monatlich': fields.List(fields.Nested(monat_stat_model)),
+    'haendler': fields.List(fields.Nested(haendler_stat_model))
+})
+
+
+@statistiken_ns.route('')
+class StatistikenResource(Resource):
+    @statistiken_ns.doc('get_statistiken',
+        params={
+            'konto_id': 'Filter auf ein Konto (optional)',
+            'jahr': 'Jahr, z.B. 2026 (optional)',
+            'monate': 'Anzahl Monate zurück (default: 12)'
+        })
+    @statistiken_ns.marshal_with(statistiken_model)
+    def get(self):
+        """Liefert aggregierte Statistiken für das Dashboard"""
+        konto_id = request.args.get('konto_id', type=int)
+        jahr = request.args.get('jahr', type=int)
+        monate = request.args.get('monate', type=int, default=12)
+
+        conn = get_db()
+
+        # Zeitraum berechnen
+        if jahr:
+            von = f"{jahr}-01-01"
+            bis = f"{jahr}-12-31"
+        else:
+            from datetime import timedelta
+            bis_date = datetime.now()
+            von_date = bis_date - timedelta(days=monate * 30)
+            von = von_date.strftime('%Y-%m-%d')
+            bis = bis_date.strftime('%Y-%m-%d')
+
+        # Basis-Query-Bedingungen
+        conditions = ["t.datum >= ? AND t.datum <= ?"]
+        params = [von, bis]
+
+        if konto_id:
+            conditions.append("a.konto_id = ?")
+            params.append(konto_id)
+
+        where_clause = " AND ".join(conditions)
+
+        # 1. Kategorien-Statistik
+        kategorien_query = f"""
+            SELECT
+                COALESCE(t.kategorie, 'sonstiges') as name,
+                SUM(t.betrag) as summe,
+                COUNT(*) as anzahl
+            FROM transaktionen t
+            JOIN abrechnungen a ON t.abrechnung_id = a.id
+            WHERE {where_clause}
+            GROUP BY t.kategorie
+            ORDER BY summe DESC
+        """
+        kategorien_raw = conn.execute(kategorien_query, params).fetchall()
+        kategorien = []
+        for k in kategorien_raw:
+            name = k['name'] or 'sonstiges'
+            label = KATEGORIEN.get(name, name.replace('_', ' ').title())
+            kategorien.append({
+                'name': name,
+                'label': label,
+                'summe': round(k['summe'] or 0, 2),
+                'anzahl': k['anzahl']
+            })
+
+        # 2. Monatliche Statistik
+        monatlich_query = f"""
+            SELECT
+                strftime('%Y-%m', t.datum) as monat,
+                SUM(t.betrag) as summe
+            FROM transaktionen t
+            JOIN abrechnungen a ON t.abrechnung_id = a.id
+            WHERE {where_clause}
+            GROUP BY strftime('%Y-%m', t.datum)
+            ORDER BY monat
+        """
+        monatlich_raw = conn.execute(monatlich_query, params).fetchall()
+        monatlich = [{
+            'monat': m['monat'],
+            'summe': round(m['summe'] or 0, 2)
+        } for m in monatlich_raw]
+
+        # 3. Top Händler
+        haendler_query = f"""
+            SELECT
+                t.haendler as name,
+                SUM(t.betrag) as summe,
+                COUNT(*) as anzahl
+            FROM transaktionen t
+            JOIN abrechnungen a ON t.abrechnung_id = a.id
+            WHERE {where_clause} AND t.haendler IS NOT NULL AND t.haendler != ''
+            GROUP BY t.haendler
+            ORDER BY summe DESC
+            LIMIT 10
+        """
+        haendler_raw = conn.execute(haendler_query, params).fetchall()
+        haendler = [{
+            'name': h['name'],
+            'summe': round(h['summe'] or 0, 2),
+            'anzahl': h['anzahl']
+        } for h in haendler_raw]
+
+        conn.close()
+
+        return {
+            'zeitraum': {'von': von, 'bis': bis},
+            'kategorien': kategorien,
+            'monatlich': monatlich,
+            'haendler': haendler
+        }
 
 
 # =============================================================================
