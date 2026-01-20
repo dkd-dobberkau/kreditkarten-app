@@ -15,8 +15,8 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 # Copy dependency files
 COPY pyproject.toml uv.lock* ./
 
-# Install dependencies
-RUN uv sync --frozen --no-dev 2>/dev/null || uv pip install --system --no-cache -r pyproject.toml
+# Install dependencies to system Python
+RUN uv pip install --system --no-cache -r pyproject.toml
 
 # Production Image
 FROM python:3.11-slim
@@ -37,8 +37,7 @@ RUN useradd -m -u 1000 appuser
 WORKDIR /app
 
 # Copy Python packages from builder
-COPY --from=builder /app/.venv /app/.venv 2>/dev/null || true
-COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages 2>/dev/null || true
+COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
 
 # Create directories for data (will be overwritten by volume mounts)
@@ -50,7 +49,6 @@ USER appuser
 # Environment
 ENV PYTHONUNBUFFERED=1
 ENV FLASK_APP=app.py
-ENV PATH="/app/.venv/bin:$PATH"
 
 # Health Check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
