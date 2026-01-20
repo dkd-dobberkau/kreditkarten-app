@@ -1,0 +1,42 @@
+services:
+  kreditkarten:
+    build:
+      context: ../services/kreditkarten
+      dockerfile: Dockerfile
+    container_name: ddev-${DDEV_SITENAME}-kreditkarten
+    labels:
+      com.ddev.site-name: ${DDEV_SITENAME}
+      com.ddev.approot: ${DDEV_APPROOT}
+    volumes:
+      - ../services/kreditkarten:/app:cached
+      - ../data:/app/data
+      - /Users/olivier/Documents/Finanzen/Kreditkarten-Belege:/app/belege
+    environment:
+      - PYTHONUNBUFFERED=1
+      - GUNICORN_WORKERS=2
+      - LOG_LEVEL=info
+      - DATA_DIR=/app/data
+      - EXPORTS_DIR=/app/exports
+    env_file:
+      - ../services/kreditkarten/.env
+    networks:
+      - default
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  health:
+    build:
+      context: ../services/health
+      dockerfile: Dockerfile
+    container_name: ddev-${DDEV_SITENAME}-health
+    labels:
+      com.ddev.site-name: ${DDEV_SITENAME}
+      com.ddev.approot: ${DDEV_APPROOT}
+    networks:
+      - default
+    restart: unless-stopped

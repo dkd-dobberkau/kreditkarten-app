@@ -1,0 +1,41 @@
+services:
+  kreditkarten:
+    build: .
+    container_name: kreditkarten-app
+    ports:
+      - "5001:5000"
+    volumes:
+      # Persistente Daten
+      - ./data:/app/data
+      - ./exports:/app/exports
+      - ./logs:/app/logs
+      # Beleg-Ordner (extern unter Documents/Finanzen)
+      - /Users/olivier/Documents/Finanzen/Kreditkarten-Belege:/app/belege
+      # Import-Ordner
+      - ./imports:/app/imports
+    environment:
+      - PYTHONUNBUFFERED=1
+      - GUNICORN_WORKERS=2
+      - LOG_LEVEL=info
+      - DATA_DIR=/app/data
+      - EXPORTS_DIR=/app/exports
+    env_file:
+      - .env
+    networks:
+      - traefik-proxy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.kreditkarten.rule=Host(`kreditkarten.localhost`)"
+      - "traefik.http.routers.kreditkarten.entrypoints=web"
+      - "traefik.http.services.kreditkarten.loadbalancer.server.port=5000"
+
+networks:
+  traefik-proxy:
+    external: true

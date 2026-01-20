@@ -1,0 +1,3039 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kreditkarten-Abgleich</title>
+    <!-- Materialize CSS -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/css/materialize.min.css">
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <style>
+        :root {
+            --primary-color: #1565c0;
+            --success-color: #4caf50;
+            --warning-color: #ff9800;
+            --error-color: #f44336;
+        }
+        body {
+            background-color: #f5f5f5;
+        }
+        nav {
+            background-color: var(--primary-color);
+        }
+        .container {
+            max-width: 1400px;
+        }
+        .card {
+            border-radius: 8px;
+        }
+        .card .card-title {
+            font-size: 1.3rem;
+            font-weight: 500;
+        }
+        .status-badge {
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 0.85rem;
+            font-weight: 500;
+        }
+        .status-offen { background-color: #fff3e0; color: #e65100; }
+        .status-zugeordnet { background-color: #e8f5e9; color: #2e7d32; }
+        .status-ignoriert { background-color: #eceff1; color: #546e7a; }
+
+        .stats-card {
+            text-align: center;
+            padding: 20px;
+        }
+        .stats-card .stats-value {
+            font-size: 2rem;
+            font-weight: 700;
+            color: var(--primary-color);
+        }
+        .stats-card .stats-label {
+            font-size: 0.9rem;
+            color: #757575;
+        }
+
+        .transaction-row {
+            padding: 12px 16px;
+            border-bottom: 1px solid #e0e0e0;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+        .transaction-row:hover {
+            background-color: #f5f5f5;
+        }
+        .transaction-date {
+            min-width: 80px;
+            color: #757575;
+        }
+        .transaction-desc {
+            flex: 1;
+        }
+        .transaction-amount {
+            font-weight: 500;
+            min-width: 100px;
+            text-align: right;
+        }
+        .transaction-status {
+            min-width: 100px;
+        }
+
+        .category-header {
+            background-color: #eceff1;
+            padding: 12px 16px;
+            font-weight: 500;
+            display: flex;
+            justify-content: space-between;
+            cursor: pointer;
+        }
+        .category-header:hover {
+            background-color: #e0e0e0;
+        }
+
+        .upload-zone {
+            border: 2px dashed #bdbdbd;
+            border-radius: 8px;
+            padding: 40px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        .upload-zone:hover, .upload-zone.drag-over {
+            border-color: var(--primary-color);
+            background-color: #e3f2fd;
+        }
+        .upload-zone i {
+            font-size: 48px;
+            color: #9e9e9e;
+        }
+
+        .confidence-bar {
+            height: 4px;
+            border-radius: 2px;
+            background-color: #e0e0e0;
+        }
+        .confidence-fill {
+            height: 100%;
+            border-radius: 2px;
+            background-color: var(--success-color);
+        }
+
+        .modal { max-height: 90%; }
+        .modal .modal-content { padding: 24px; }
+
+        /* Hilfe-Modal Styles */
+        #hilfe-modal .modal-content { padding: 0; height: calc(100% - 56px); }
+        #hilfe-modal .row { height: 100%; }
+        .hilfe-kapitel-item { padding: 12px 16px !important; color: #333 !important; }
+        .hilfe-kapitel-item.active { background-color: #1976d2 !important; color: #fff !important; font-weight: 500; }
+        .hilfe-kapitel-item.active .badge { background-color: #fff !important; color: #1976d2 !important; }
+        .hilfe-kapitel-item:hover:not(.active) { background-color: #e3f2fd; }
+        .hilfe-content h1 { font-size: 1.8rem; margin-top: 0; border-bottom: 2px solid #1976d2; padding-bottom: 10px; }
+        .hilfe-content h2 { font-size: 1.4rem; margin-top: 25px; color: #1976d2; }
+        .hilfe-content h3 { font-size: 1.2rem; margin-top: 20px; }
+        .hilfe-content table { width: 100%; margin: 15px 0; border-collapse: collapse; }
+        .hilfe-content th, .hilfe-content td { padding: 10px; border: 1px solid #ddd; text-align: left; }
+        .hilfe-content th { background: #f5f5f5; }
+        .hilfe-content code { background: #e8e8e8; padding: 2px 6px; border-radius: 3px; font-family: monospace; color: #333; }
+        .hilfe-content pre { background: #37474f; color: #eceff1; padding: 15px; border-radius: 4px; overflow-x: auto; border: 1px solid #546e7a; line-height: 1.5; }
+        .hilfe-content pre code { background: transparent; color: inherit; padding: 0; }
+        .hilfe-content ul { margin-left: 20px; }
+        .hilfe-content li { margin: 8px 0; }
+
+        /* Sortable table headers */
+        th.sortable:hover { background-color: #e3f2fd; }
+        th.sortable i { vertical-align: middle; margin-left: 4px; }
+
+        .collapsible-header {
+            display: flex;
+            align-items: center;
+            padding: 12px 16px;
+        }
+        .collapsible-header .badge {
+            margin-left: auto;
+        }
+
+        #pdf-viewer-container {
+            width: 100%;
+            height: 70vh;
+            overflow: auto;
+            background: #525659;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px 0;
+        }
+        #pdf-viewer-container canvas {
+            margin-bottom: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+        }
+        .pdf-controls {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px;
+            background: #424242;
+            color: white;
+            border-radius: 4px 4px 0 0;
+        }
+        .pdf-controls button {
+            background: #616161;
+            color: white;
+            border: none;
+            padding: 8px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .pdf-controls button:hover {
+            background: #757575;
+        }
+        .pdf-controls button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .pdf-page-info {
+            min-width: 100px;
+            text-align: center;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #9e9e9e;
+        }
+        .empty-state i {
+            font-size: 64px;
+            margin-bottom: 16px;
+        }
+
+        .chip.kategorie {
+            font-size: 0.8rem;
+        }
+
+        .preloader-wrapper.tiny {
+            width: 18px;
+            height: 18px;
+        }
+    </style>
+</head>
+<body>
+    <!-- Navbar -->
+    <nav>
+        <div class="nav-wrapper container">
+            <a href="#" class="brand-logo">
+                <i class="material-icons">credit_card</i>
+                Kreditkarten-Abgleich
+            </a>
+            <ul id="nav-mobile" class="right">
+                <li><a href="#" onclick="toggleDashboard()" title="Dashboard"><i class="material-icons">dashboard</i></a></li>
+                <li><a href="#" onclick="toggleBelege()" title="Belege-Übersicht"><i class="material-icons">receipt_long</i></a></li>
+                <li><a href="#" onclick="openPersonenModal()" title="Personen verwalten"><i class="material-icons">people</i></a></li>
+                <li><a href="#" onclick="openSettings()"><i class="material-icons">settings</i></a></li>
+                <li><a href="#" onclick="showHelp()"><i class="material-icons">help</i></a></li>
+                <li><a href="/api/docs" target="_blank" title="API Dokumentation"><i class="material-icons">code</i></a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <div class="container" style="margin-top: 20px;">
+        <!-- Dashboard Section (hidden by default) -->
+        <div id="dashboard-section" style="display: none;">
+            <div class="row">
+                <div class="col s12">
+                    <h5><i class="material-icons left">dashboard</i>Dashboard</h5>
+                </div>
+            </div>
+            <!-- Dashboard Filters -->
+            <div class="row">
+                <div class="col s12 m3">
+                    <div class="input-field">
+                        <select id="dashboard-konto" onchange="loadDashboard()">
+                            <option value="">Alle Konten</option>
+                        </select>
+                        <label>Kreditkarte</label>
+                    </div>
+                </div>
+                <div class="col s12 m3">
+                    <div class="input-field">
+                        <select id="dashboard-jahr" onchange="loadDashboard()">
+                            <option value="">Alle Jahre</option>
+                        </select>
+                        <label>Jahr</label>
+                    </div>
+                </div>
+                <div class="col s12 m3">
+                    <div class="input-field">
+                        <select id="dashboard-monate" onchange="loadDashboard()">
+                            <option value="3">Letzte 3 Monate</option>
+                            <option value="6">Letzte 6 Monate</option>
+                            <option value="12" selected>Letzte 12 Monate</option>
+                            <option value="24">Letzte 24 Monate</option>
+                        </select>
+                        <label>Zeitraum</label>
+                    </div>
+                </div>
+                <div class="col s12 m3" style="padding-top: 20px;">
+                    <a class="btn-flat waves-effect" onclick="toggleDashboard()">
+                        <i class="material-icons left">arrow_back</i>Zurück
+                    </a>
+                </div>
+            </div>
+            <!-- Charts Row 1 -->
+            <div class="row">
+                <div class="col s12 m5">
+                    <div class="card">
+                        <div class="card-content">
+                            <span class="card-title">Ausgaben nach Kategorie</span>
+                            <div style="position: relative; height: 300px;">
+                                <canvas id="chart-kategorien"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col s12 m7">
+                    <div class="card">
+                        <div class="card-content">
+                            <span class="card-title">Monatlicher Verlauf</span>
+                            <div style="position: relative; height: 300px;">
+                                <canvas id="chart-monatlich"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <!-- Charts Row 2 -->
+            <div class="row">
+                <div class="col s12">
+                    <div class="card">
+                        <div class="card-content">
+                            <span class="card-title">Top 10 Händler</span>
+                            <div style="position: relative; height: 300px;">
+                                <canvas id="chart-haendler"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Belege Section (hidden by default) -->
+        <div id="belege-section" style="display: none;">
+            <div class="row">
+                <div class="col s12">
+                    <h5><i class="material-icons left">receipt_long</i>Belege-Übersicht</h5>
+                </div>
+            </div>
+            <!-- Belege Filters -->
+            <div class="row">
+                <div class="col s12 m3">
+                    <div class="input-field">
+                        <select id="belege-konto" onchange="loadBelege()">
+                            <option value="">Alle Konten</option>
+                        </select>
+                        <label>Kreditkarte</label>
+                    </div>
+                </div>
+                <div class="col s12 m2">
+                    <div class="input-field">
+                        <input type="text" id="belege-von" class="datepicker" placeholder="Von">
+                        <label for="belege-von" class="active">Von</label>
+                    </div>
+                </div>
+                <div class="col s12 m2">
+                    <div class="input-field">
+                        <input type="text" id="belege-bis" class="datepicker" placeholder="Bis">
+                        <label for="belege-bis" class="active">Bis</label>
+                    </div>
+                </div>
+                <div class="col s12 m2">
+                    <div class="input-field">
+                        <select id="belege-status" onchange="loadBelege()">
+                            <option value="">Alle</option>
+                            <option value="zugeordnet">Zugeordnet</option>
+                            <option value="offen">Nicht zugeordnet</option>
+                        </select>
+                        <label>Status</label>
+                    </div>
+                </div>
+                <div class="col s12 m3" style="padding-top: 20px;">
+                    <a class="btn waves-effect waves-light" onclick="loadBelege()">
+                        <i class="material-icons left">search</i>Filtern
+                    </a>
+                    <a class="btn-flat waves-effect" onclick="toggleBelege()">
+                        <i class="material-icons left">arrow_back</i>Zurück
+                    </a>
+                </div>
+            </div>
+            <!-- Belege Table -->
+            <div class="row">
+                <div class="col s12">
+                    <div class="card">
+                        <div class="card-content" style="padding: 0;">
+                            <table class="striped highlight">
+                                <thead>
+                                    <tr>
+                                        <th class="sortable" data-sort="datum" onclick="sortBelege('datum')" style="cursor: pointer;">
+                                            Datum <i class="material-icons tiny" id="sort-icon-datum">unfold_more</i>
+                                        </th>
+                                        <th class="sortable" data-sort="haendler" onclick="sortBelege('haendler')" style="cursor: pointer;">
+                                            Händler <i class="material-icons tiny" id="sort-icon-haendler">unfold_more</i>
+                                        </th>
+                                        <th class="sortable right-align" data-sort="betrag" onclick="sortBelege('betrag')" style="cursor: pointer;">
+                                            Betrag <i class="material-icons tiny" id="sort-icon-betrag">unfold_more</i>
+                                        </th>
+                                        <th class="sortable" data-sort="konto" onclick="sortBelege('konto')" style="cursor: pointer;">
+                                            Konto <i class="material-icons tiny" id="sort-icon-konto">unfold_more</i>
+                                        </th>
+                                        <th class="sortable" data-sort="status" onclick="sortBelege('status')" style="cursor: pointer;">
+                                            Status <i class="material-icons tiny" id="sort-icon-status">unfold_more</i>
+                                        </th>
+                                        <th class="center-align">Aktion</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="belege-table-body">
+                                    <tr>
+                                        <td colspan="6" class="center-align grey-text">
+                                            <i class="material-icons">hourglass_empty</i><br>
+                                            Lade Belege...
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <!-- Pagination -->
+            <div class="row">
+                <div class="col s12 center-align">
+                    <span id="belege-pagination-info" class="grey-text"></span>
+                    <ul class="pagination" id="belege-pagination" style="display: inline-flex; margin-left: 20px;"></ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Content Section -->
+        <div id="main-section">
+        <!-- Controls -->
+        <div class="row">
+            <div class="col s12 m4">
+                <div class="input-field">
+                    <select id="konto-select" onchange="loadAbrechnungen()">
+                        <option value="">Konto wählen...</option>
+                    </select>
+                    <label>Kreditkarte</label>
+                </div>
+            </div>
+            <div class="col s12 m4">
+                <div class="input-field">
+                    <select id="abrechnung-select" onchange="loadAbrechnung()">
+                        <option value="">Abrechnung wählen...</option>
+                    </select>
+                    <label>Periode</label>
+                </div>
+            </div>
+            <div class="col s12 m4" style="padding-top: 20px;">
+                <a class="btn waves-effect waves-light" onclick="openImportModal()">
+                    <i class="material-icons left">upload</i>Import
+                </a>
+                <a class="btn-flat waves-effect" onclick="openNewKontoModal()">
+                    <i class="material-icons left">add</i>Neues Konto
+                </a>
+                <a class="btn-flat waves-effect red-text" id="delete-abrechnung-btn" style="display: none;" onclick="deleteAbrechnung()" title="Abrechnung löschen">
+                    <i class="material-icons">delete</i>
+                </a>
+            </div>
+        </div>
+
+        <!-- Statistics -->
+        <div class="row" id="stats-row" style="display: none;">
+            <div class="col s6 m3">
+                <div class="card stats-card">
+                    <div class="stats-value" id="stat-total">0</div>
+                    <div class="stats-label">Transaktionen</div>
+                </div>
+            </div>
+            <div class="col s6 m3">
+                <div class="card stats-card">
+                    <div class="stats-value" id="stat-zugeordnet" style="color: #4caf50;">0</div>
+                    <div class="stats-label">Zugeordnet</div>
+                </div>
+            </div>
+            <div class="col s6 m3">
+                <div class="card stats-card" style="cursor: pointer;" onclick="showFehlendeBelege()">
+                    <div class="stats-value" id="stat-offen" style="color: #ff9800;">0</div>
+                    <div class="stats-label">Fehlende Belege <i class="material-icons tiny">visibility</i></div>
+                </div>
+            </div>
+            <div class="col s6 m3">
+                <div class="card stats-card">
+                    <div class="stats-value" id="stat-summe">0 €</div>
+                    <div class="stats-label">Gesamt</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Mini Statistics for current statement -->
+        <div class="row" id="mini-stats-row" style="display: none;">
+            <div class="col s12 m4">
+                <div class="card">
+                    <div class="card-content" style="padding: 12px 16px;">
+                        <span class="card-title" style="font-size: 1rem; margin-bottom: 8px;">
+                            <i class="material-icons left" style="font-size: 1.2rem;">pie_chart</i>Kategorien
+                        </span>
+                        <div id="mini-kategorien" style="font-size: 0.9rem;"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="col s12 m4">
+                <div class="card">
+                    <div class="card-content" style="padding: 12px 16px;">
+                        <span class="card-title" style="font-size: 1rem; margin-bottom: 8px;">
+                            <i class="material-icons left" style="font-size: 1.2rem;">store</i>Top Händler
+                        </span>
+                        <div id="mini-haendler" style="font-size: 0.9rem;"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="col s12 m4">
+                <div class="card">
+                    <div class="card-content" style="padding: 12px 16px;">
+                        <span class="card-title" style="font-size: 1rem; margin-bottom: 8px;">
+                            <i class="material-icons left" style="font-size: 1.2rem;">receipt</i>Beleg-Status
+                        </span>
+                        <div id="mini-status" style="font-size: 0.9rem;"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <div class="row">
+            <!-- Transactions -->
+            <div class="col s12 m8">
+                <div class="card">
+                    <div class="card-content">
+                        <span class="card-title">
+                            Transaktionen
+                            <a class="btn-flat btn-small right" id="kategorisieren-btn" onclick="kategorisiereAlle()" title="Alle kategorisieren">
+                                <i class="material-icons">auto_fix_high</i>
+                            </a>
+                            <a class="btn-flat btn-small right" id="export-zip-btn" style="display: none;" onclick="exportZip()" title="Komplettexport (ZIP)">
+                                <i class="material-icons">folder_zip</i>
+                            </a>
+                            <a class="btn-flat btn-small right" id="export-list-btn" style="display: none;" onclick="exportTransaktionsliste()" title="Liste exportieren (PDF)">
+                                <i class="material-icons">download</i>
+                            </a>
+                            <a class="btn-flat btn-small right" id="view-abrechnung-btn" style="display: none;" onclick="viewAbrechnung()" title="Kreditkartenabrechnung anzeigen">
+                                <i class="material-icons">picture_as_pdf</i>
+                            </a>
+                            <a class="btn-flat btn-small right" id="upload-abrechnung-btn" style="display: none;" onclick="document.getElementById('abrechnung-pdf-input').click()" title="PDF hochladen">
+                                <i class="material-icons">upload_file</i>
+                            </a>
+                            <input type="file" id="abrechnung-pdf-input" hidden accept=".pdf" onchange="uploadAbrechnungPdf(this)">
+                        </span>
+                        <div id="transaktionen-liste">
+                            <div class="empty-state">
+                                <i class="material-icons">receipt_long</i>
+                                <p>Wählen Sie eine Abrechnung aus oder importieren Sie eine neue.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Receipts -->
+            <div class="col s12 m4">
+                <div class="card">
+                    <div class="card-content">
+                        <span class="card-title">Belege <a href="#" onclick="showHelp('03-belege-zuordnen'); return false;" class="grey-text" style="font-size: 0.9rem;"><i class="material-icons tiny">help_outline</i></a></span>
+
+                        <!-- Upload Zone -->
+                        <div class="upload-zone" id="beleg-upload" onclick="document.getElementById('beleg-input').click()">
+                            <i class="material-icons">cloud_upload</i>
+                            <p>Belege hierher ziehen<br>oder klicken zum Auswählen</p>
+                            <input type="file" id="beleg-input" hidden multiple accept=".pdf,.png,.jpg,.jpeg">
+                        </div>
+
+                        <!-- Auto-Match Button -->
+                        <div style="margin-top: 12px; text-align: center;">
+                            <a class="btn-small waves-effect waves-light" onclick="autoMatchAllBelege()">
+                                <i class="material-icons left">auto_fix_high</i>Alle zuordnen
+                            </a>
+                        </div>
+
+                        <!-- Unassigned Receipts -->
+                        <div id="unzugeordnete-belege" style="margin-top: 16px;">
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        </div><!-- End main-section -->
+    </div>
+
+    <!-- Import Modal -->
+    <div id="import-modal" class="modal">
+        <div class="modal-content">
+            <h4>Abrechnung importieren <a href="#" onclick="showHelp('02-import'); return false;" class="grey-text" style="font-size: 1rem;"><i class="material-icons tiny">help_outline</i></a></h4>
+            <div class="row">
+                <div class="input-field col s12 m6">
+                    <select id="import-konto">
+                        <option value="">Konto wählen...</option>
+                    </select>
+                    <label>Kreditkarte</label>
+                </div>
+                <div class="input-field col s12 m6">
+                    <input type="text" id="import-periode" placeholder="z.B. November 2025">
+                    <label for="import-periode" class="active">Periode (optional)</label>
+                </div>
+            </div>
+            <div class="upload-zone" id="import-upload" onclick="document.getElementById('import-input').click()">
+                <i class="material-icons">description</i>
+                <p>CSV oder PDF hierher ziehen<br>oder klicken zum Auswählen</p>
+                <input type="file" id="import-input" hidden accept=".csv,.pdf">
+            </div>
+            <p id="import-filename" style="text-align: center; margin-top: 10px;"></p>
+        </div>
+        <div class="modal-footer">
+            <a href="#!" class="modal-close waves-effect waves-green btn-flat">Abbrechen</a>
+            <a href="#!" class="waves-effect waves-light btn" onclick="importAbrechnung()">Importieren</a>
+        </div>
+    </div>
+
+    <!-- New Account Modal -->
+    <div id="konto-modal" class="modal">
+        <div class="modal-content">
+            <h4>Neues Konto</h4>
+            <div class="row">
+                <div class="input-field col s12">
+                    <input type="text" id="konto-name" required>
+                    <label for="konto-name">Name (z.B. "Amex Gold")</label>
+                </div>
+                <div class="input-field col s12 m6">
+                    <input type="text" id="konto-bank">
+                    <label for="konto-bank">Bank</label>
+                </div>
+                <div class="input-field col s12 m6">
+                    <input type="text" id="konto-nummer" placeholder="Letzte 4 Ziffern">
+                    <label for="konto-nummer" class="active">Kartennummer (optional)</label>
+                </div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <a href="#!" class="modal-close waves-effect waves-green btn-flat">Abbrechen</a>
+            <a href="#!" class="waves-effect waves-light btn" onclick="createKonto()">Erstellen</a>
+        </div>
+    </div>
+
+    <!-- Transaction Detail Modal -->
+    <div id="transaktion-modal" class="modal modal-fixed-footer">
+        <div class="modal-content">
+            <h4 id="transaktion-title">Transaktion</h4>
+            <div class="row">
+                <div class="col s6">
+                    <p><strong>Datum:</strong> <span id="detail-datum"></span></p>
+                    <p><strong>Betrag:</strong> <span id="detail-betrag"></span></p>
+                </div>
+                <div class="col s6">
+                    <p><strong>Händler:</strong> <span id="detail-haendler"></span></p>
+                    <p><strong>Status:</strong> <span id="detail-status"></span></p>
+                </div>
+                <div class="col s12">
+                    <p><strong>Beschreibung:</strong><br><span id="detail-beschreibung"></span></p>
+                </div>
+                <div class="input-field col s12 m6">
+                    <select id="detail-kategorie">
+                        <option value="">Kategorie wählen...</option>
+                    </select>
+                    <label>Kategorie</label>
+                </div>
+                <div class="input-field col s12 m6">
+                    <select id="detail-status-select">
+                        <option value="offen">Offen</option>
+                        <option value="zugeordnet">Zugeordnet</option>
+                        <option value="ignoriert">Ignoriert</option>
+                    </select>
+                    <label>Status</label>
+                </div>
+                <div class="input-field col s12">
+                    <textarea id="detail-notizen" class="materialize-textarea"></textarea>
+                    <label for="detail-notizen">Notizen</label>
+                </div>
+            </div>
+
+            <!-- Attached Receipt -->
+            <div id="attached-beleg" style="display: none;">
+                <h5>Zugeordneter Beleg</h5>
+                <div class="card-panel" id="beleg-preview"></div>
+            </div>
+
+            <!-- Match Suggestions -->
+            <div id="match-suggestions">
+                <h5>Passende Belege</h5>
+                <div id="suggestions-list"></div>
+            </div>
+
+            <!-- Manual Assignment -->
+            <div id="manual-assignment" style="margin-top: 20px;">
+                <h5>Manuelle Zuordnung</h5>
+                <div class="row">
+                    <div class="input-field col s12 m8">
+                        <select id="manual-beleg-select">
+                            <option value="">Beleg auswählen...</option>
+                        </select>
+                        <label>Alle unzugeordneten Belege</label>
+                    </div>
+                    <div class="col s12 m4" style="padding-top: 20px;">
+                        <a class="btn waves-effect waves-light" onclick="manualAssignBeleg()">
+                            <i class="material-icons left">link</i>Zuordnen
+                        </a>
+                    </div>
+                </div>
+                <div id="manual-beleg-preview" style="display: none;" class="card-panel grey lighten-4">
+                </div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <a href="#!" class="modal-close waves-effect btn-flat">Schließen</a>
+            <a href="#!" class="waves-effect waves-light btn" onclick="saveTransaktion()">Speichern</a>
+        </div>
+    </div>
+
+    <!-- PDF Viewer Modal -->
+    <div id="pdf-modal" class="modal modal-fixed-footer" style="width: 90%; max-width: 1000px; max-height: 95%;">
+        <div class="modal-content" style="padding: 0;">
+            <div class="pdf-controls">
+                <button onclick="pdfPrevPage()" id="pdf-prev"><i class="material-icons" style="font-size: 18px;">chevron_left</i></button>
+                <span class="pdf-page-info"><span id="pdf-page-num">1</span> / <span id="pdf-page-count">1</span></span>
+                <button onclick="pdfNextPage()" id="pdf-next"><i class="material-icons" style="font-size: 18px;">chevron_right</i></button>
+                <span style="margin-left: auto;"></span>
+                <button onclick="pdfZoomOut()"><i class="material-icons" style="font-size: 18px;">zoom_out</i></button>
+                <span id="pdf-zoom-level">100%</span>
+                <button onclick="pdfZoomIn()"><i class="material-icons" style="font-size: 18px;">zoom_in</i></button>
+                <button onclick="pdfDownload()" title="Download"><i class="material-icons" style="font-size: 18px;">download</i></button>
+            </div>
+            <div id="pdf-viewer-container">
+                <div id="pdf-loading" style="color: white; padding: 40px;">
+                    <div class="preloader-wrapper active">
+                        <div class="spinner-layer spinner-white-only">
+                            <div class="circle-clipper left"><div class="circle"></div></div>
+                            <div class="gap-patch"><div class="circle"></div></div>
+                            <div class="circle-clipper right"><div class="circle"></div></div>
+                        </div>
+                    </div>
+                    <p>PDF wird geladen...</p>
+                </div>
+                <canvas id="pdf-canvas" style="display: none;"></canvas>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <span id="pdf-filename" style="float: left; padding: 10px; color: #757575;"></span>
+            <a href="#!" class="modal-close waves-effect waves-green btn-flat">Schließen</a>
+        </div>
+    </div>
+
+    <!-- Fehlende Belege Modal -->
+    <div id="fehlende-belege-modal" class="modal modal-fixed-footer" style="width: 90%; max-width: 900px;">
+        <div class="modal-content">
+            <h4>
+                <i class="material-icons left" style="color: #ff9800;">warning</i>
+                Transaktionen ohne Beleg
+            </h4>
+            <p class="grey-text">Diese Transaktionen haben noch keinen zugeordneten Beleg.</p>
+
+            <table class="striped responsive-table">
+                <thead>
+                    <tr>
+                        <th>Datum</th>
+                        <th>Beschreibung</th>
+                        <th>Kategorie</th>
+                        <th class="right-align">Betrag</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody id="fehlende-belege-liste">
+                </tbody>
+                <tfoot>
+                    <tr>
+                        <th colspan="3"><strong>Summe fehlende Belege:</strong></th>
+                        <th class="right-align"><strong id="fehlende-summe">0,00 €</strong></th>
+                        <th></th>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+        <div class="modal-footer">
+            <a href="#!" class="modal-close waves-effect waves-green btn-flat">Schließen</a>
+            <a href="#!" class="waves-effect waves-light btn" onclick="exportFehlendeBelege()">
+                <i class="material-icons left">download</i>Als CSV exportieren
+            </a>
+        </div>
+    </div>
+
+    <!-- Settings Modal -->
+    <div id="settings-modal" class="modal">
+        <div class="modal-content">
+            <h4>Einstellungen</h4>
+            <div class="row">
+                <div class="input-field col s12 m6">
+                    <input type="text" id="settings-name">
+                    <label for="settings-name">Name</label>
+                </div>
+                <div class="input-field col s12 m6">
+                    <input type="text" id="settings-firma">
+                    <label for="settings-firma">Firma</label>
+                </div>
+                <div class="input-field col s12">
+                    <input type="text" id="settings-bewirtender">
+                    <label for="settings-bewirtender">Bewirtender Name (für Bewirtungsbelege)</label>
+                </div>
+                <div class="col s12">
+                    <label>
+                        <input type="checkbox" id="settings-auto-kat" checked>
+                        <span>Automatische Kategorisierung</span>
+                    </label>
+                </div>
+                <div class="col s12">
+                    <label>
+                        <input type="checkbox" id="settings-auto-match" checked>
+                        <span>Automatisches Beleg-Matching</span>
+                    </label>
+                </div>
+                <div class="col s12" style="margin-top: 20px;">
+                    <label>Unterschrift (für Bewirtungsbelege)</label>
+                    <div class="file-field input-field" style="margin-top: 8px;">
+                        <div class="btn btn-small">
+                            <span>PNG hochladen</span>
+                            <input type="file" id="signature-upload" accept="image/png" onchange="uploadSignature(this)">
+                        </div>
+                        <div class="file-path-wrapper">
+                            <input class="file-path validate" type="text" placeholder="Unterschrift als PNG auswählen...">
+                        </div>
+                    </div>
+                    <div id="signature-preview-container" style="display: none; margin-top: 10px;">
+                        <p class="grey-text" style="margin-bottom: 5px;">Vorschau:</p>
+                        <div style="border: 1px solid #e0e0e0; border-radius: 4px; padding: 10px; background: #fff; display: inline-block;">
+                            <img id="signature-preview" style="max-width: 200px; max-height: 80px;">
+                        </div>
+                        <a class="btn-small waves-effect waves-light red" onclick="clearSignature()" style="margin-left: 10px; vertical-align: top;">
+                            <i class="material-icons">delete</i>
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <a href="#!" class="modal-close waves-effect btn-flat">Schließen</a>
+            <a href="#!" class="waves-effect waves-light btn" onclick="saveSettings()">Speichern</a>
+        </div>
+    </div>
+
+    <!-- Bewirtungsbeleg Modal -->
+    <div id="bewirtungsbeleg-modal" class="modal modal-fixed-footer" style="max-width: 700px;">
+        <div class="modal-content">
+            <h4>Bewirtungsbeleg erstellen <a href="#" onclick="showHelp('05-bewirtungsbelege'); return false;" class="grey-text" style="font-size: 1rem;"><i class="material-icons tiny">help_outline</i></a></h4>
+            <p class="grey-text">gemäß § 4 Abs. 5 Nr. 2 EStG</p>
+
+            <div class="row">
+                <div class="input-field col s6">
+                    <input type="text" id="bew-datum" readonly>
+                    <label for="bew-datum" class="active">Datum</label>
+                </div>
+                <div class="input-field col s6">
+                    <input type="text" id="bew-betrag" readonly>
+                    <label for="bew-betrag" class="active">Betrag</label>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="input-field col s12">
+                    <input type="text" id="bew-restaurant">
+                    <label for="bew-restaurant" class="active">Restaurant/Ort</label>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="input-field col s12">
+                    <input type="text" id="bew-ort">
+                    <label for="bew-ort">Anschrift (optional)</label>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="input-field col s12">
+                    <input type="text" id="bew-anlass" value="Geschäftliche Besprechung">
+                    <label for="bew-anlass" class="active">Anlass der Bewirtung</label>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col s12">
+                    <label>Bewirtete Personen</label>
+                    <div id="bew-teilnehmer-list" class="collection" style="margin-top: 10px; min-height: 50px; border: 1px solid #e0e0e0; border-radius: 4px;">
+                        <!-- Teilnehmer werden hier eingefügt -->
+                    </div>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="input-field col s6">
+                    <input type="text" id="bew-person-name" placeholder="Name">
+                    <label for="bew-person-name" class="active">Neuer Gast</label>
+                </div>
+                <div class="input-field col s5">
+                    <input type="text" id="bew-person-firma" placeholder="Firma/Funktion">
+                </div>
+                <div class="col s1" style="padding-top: 25px;">
+                    <a class="btn-floating btn-small waves-effect waves-light green" onclick="addBewTeilnehmer()">
+                        <i class="material-icons">add</i>
+                    </a>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col s12">
+                    <p class="grey-text text-darken-1" style="font-size: 0.9rem;">
+                        <i class="material-icons tiny">info</i>
+                        Gespeicherte Kontakte:
+                        <span id="bew-kontakte-chips"></span>
+                    </p>
+                </div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <a href="#!" class="modal-close waves-effect btn-flat">Abbrechen</a>
+            <a href="#!" class="waves-effect waves-light btn" onclick="createBewirtungsbeleg()">
+                <i class="material-icons left">picture_as_pdf</i>PDF erstellen
+            </a>
+        </div>
+    </div>
+
+    <!-- Personen Modal -->
+    <div id="personen-modal" class="modal modal-fixed-footer" style="max-width: 600px; max-height: 80%;">
+        <div class="modal-content">
+            <h4><i class="material-icons left">people</i>Personen verwalten</h4>
+            <p class="grey-text">Kontakte für Bewirtungsbelege</p>
+
+            <div class="row" style="margin-top: 20px;">
+                <div class="input-field col s5">
+                    <input type="text" id="person-name" placeholder="Name eingeben">
+                    <label for="person-name" class="active">Name *</label>
+                </div>
+                <div class="input-field col s5">
+                    <input type="text" id="person-firma" placeholder="Firma/Funktion">
+                    <label for="person-firma" class="active">Firma</label>
+                </div>
+                <div class="col s2" style="padding-top: 25px;">
+                    <a class="btn-floating waves-effect waves-light green" onclick="savePersonFromModal()">
+                        <i class="material-icons">add</i>
+                    </a>
+                </div>
+            </div>
+
+            <div class="divider"></div>
+
+            <ul id="personen-list" class="collection" style="margin-top: 15px; max-height: 300px; overflow-y: auto;">
+                <!-- Personen werden hier eingefügt -->
+            </ul>
+
+            <div id="personen-empty" class="center-align grey-text" style="padding: 30px; display: none;">
+                <i class="material-icons medium">person_add</i>
+                <p>Noch keine Personen angelegt</p>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <a href="#!" class="modal-close waves-effect btn-flat">Schließen</a>
+        </div>
+    </div>
+
+    <!-- Hilfe Modal -->
+    <div id="hilfe-modal" class="modal modal-fixed-footer" style="width: 90%; max-width: 1100px; max-height: 90%;">
+        <div class="modal-content" style="padding: 0;">
+            <div class="row" style="margin: 0; height: 100%;">
+                <!-- Kapitel-Navigation -->
+                <div class="col s12 m4 l3" style="background: #f5f5f5; padding: 20px; height: 100%; overflow-y: auto;">
+                    <h5 style="margin-top: 0;"><i class="material-icons left">menu_book</i>Handbuch</h5>
+                    <ul id="hilfe-kapitel-list" class="collection" style="border: none; margin-top: 20px;">
+                        <!-- Kapitel werden hier eingefügt -->
+                    </ul>
+                </div>
+                <!-- Inhalt -->
+                <div class="col s12 m8 l9" style="padding: 24px; height: 100%; overflow-y: auto;">
+                    <div id="hilfe-inhalt">
+                        <div class="center-align" style="padding: 50px;">
+                            <div class="preloader-wrapper active">
+                                <div class="spinner-layer spinner-blue-only">
+                                    <div class="circle-clipper left"><div class="circle"></div></div>
+                                    <div class="circle-clipper right"><div class="circle"></div></div>
+                                </div>
+                            </div>
+                            <p class="grey-text">Lade Handbuch...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <a href="/api/hilfe/pdf" class="btn waves-effect waves-light" style="margin-right: 10px;">
+                <i class="material-icons left">picture_as_pdf</i>Als PDF
+            </a>
+            <a href="#!" class="modal-close waves-effect btn-flat">Schließen</a>
+        </div>
+    </div>
+
+    <!-- Materialize JS -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/js/materialize.min.js"></script>
+    <!-- PDF.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+
+    <script>
+        // Global state
+        let currentTransaktionId = null;
+        let kategorien = {};
+        let transaktionen = [];
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', function() {
+            M.AutoInit();
+            loadKonten();
+            loadKategorien();
+            loadUnzugeordneteBelege();
+            setupDragDrop();
+        });
+
+        // API Helpers
+        async function api(endpoint, options = {}) {
+            const response = await fetch(endpoint, {
+                headers: { 'Content-Type': 'application/json' },
+                ...options
+            });
+
+            const contentType = response.headers.get('content-type');
+            if (!contentType || !contentType.includes('application/json')) {
+                throw new Error(`Server-Fehler (${response.status}): Keine JSON-Antwort`);
+            }
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(data.error || `HTTP ${response.status}`);
+            }
+
+            return data;
+        }
+
+        // Load accounts
+        async function loadKonten() {
+            const konten = await api('/api/konten');
+            const select = document.getElementById('konto-select');
+            const importSelect = document.getElementById('import-konto');
+            const dashboardSelect = document.getElementById('dashboard-konto');
+
+            const options = konten.map(k => `<option value="${k.id}">${k.name}</option>`).join('');
+            select.innerHTML = '<option value="">Konto wählen...</option>' + options;
+            importSelect.innerHTML = '<option value="">Konto wählen...</option>' + options;
+            dashboardSelect.innerHTML = '<option value="">Alle Konten</option>' + options;
+
+            M.FormSelect.init(select);
+            M.FormSelect.init(importSelect);
+            M.FormSelect.init(dashboardSelect);
+
+            // Populate dashboard year select
+            initDashboardYears();
+        }
+
+        // =============================================================================
+        // Dashboard Functions
+        // =============================================================================
+
+        let chartKategorien = null;
+        let chartMonatlich = null;
+        let chartHaendler = null;
+
+        function initDashboardYears() {
+            const select = document.getElementById('dashboard-jahr');
+            const currentYear = new Date().getFullYear();
+            let options = '<option value="">Alle Jahre</option>';
+            for (let y = currentYear; y >= currentYear - 5; y--) {
+                options += `<option value="${y}">${y}</option>`;
+            }
+            select.innerHTML = options;
+            M.FormSelect.init(select);
+        }
+
+        function toggleDashboard() {
+            const dashboard = document.getElementById('dashboard-section');
+            const main = document.getElementById('main-section');
+            const belege = document.getElementById('belege-section');
+
+            if (dashboard.style.display === 'none') {
+                dashboard.style.display = 'block';
+                main.style.display = 'none';
+                belege.style.display = 'none';
+                loadDashboard();
+            } else {
+                dashboard.style.display = 'none';
+                main.style.display = 'block';
+            }
+        }
+
+        async function loadDashboard() {
+            const kontoId = document.getElementById('dashboard-konto').value;
+            const jahr = document.getElementById('dashboard-jahr').value;
+            const monate = document.getElementById('dashboard-monate').value;
+
+            let url = '/api/statistiken?';
+            if (kontoId) url += `konto_id=${kontoId}&`;
+            if (jahr) url += `jahr=${jahr}&`;
+            url += `monate=${monate}`;
+
+            try {
+                const data = await api(url);
+                renderCharts(data);
+            } catch (error) {
+                console.error('Dashboard load error:', error);
+                M.toast({html: 'Fehler beim Laden der Statistiken'});
+            }
+        }
+
+        function renderCharts(data) {
+            // Color palette
+            const colors = [
+                '#1976d2', '#388e3c', '#f57c00', '#7b1fa2',
+                '#c2185b', '#0097a7', '#689f38', '#5d4037',
+                '#455a64', '#e64a19'
+            ];
+
+            // 1. Categories Pie Chart
+            const kategorienCtx = document.getElementById('chart-kategorien').getContext('2d');
+            if (chartKategorien) chartKategorien.destroy();
+
+            chartKategorien = new Chart(kategorienCtx, {
+                type: 'doughnut',
+                data: {
+                    labels: data.kategorien.map(k => k.label),
+                    datasets: [{
+                        data: data.kategorien.map(k => k.summe),
+                        backgroundColor: colors.slice(0, data.kategorien.length)
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'right',
+                            labels: { boxWidth: 12 }
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: (ctx) => `${ctx.label}: ${ctx.raw.toLocaleString('de-DE', {style: 'currency', currency: 'EUR'})}`
+                            }
+                        }
+                    }
+                }
+            });
+
+            // 2. Monthly Line Chart
+            const monatlichCtx = document.getElementById('chart-monatlich').getContext('2d');
+            if (chartMonatlich) chartMonatlich.destroy();
+
+            chartMonatlich = new Chart(monatlichCtx, {
+                type: 'line',
+                data: {
+                    labels: data.monatlich.map(m => {
+                        const [year, month] = m.monat.split('-');
+                        return `${month}/${year.slice(2)}`;
+                    }),
+                    datasets: [{
+                        label: 'Ausgaben',
+                        data: data.monatlich.map(m => m.summe),
+                        borderColor: '#1976d2',
+                        backgroundColor: 'rgba(25, 118, 210, 0.1)',
+                        fill: true,
+                        tension: 0.3
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: (ctx) => ctx.raw.toLocaleString('de-DE', {style: 'currency', currency: 'EUR'})
+                            }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                callback: (value) => value.toLocaleString('de-DE') + ' €'
+                            }
+                        }
+                    }
+                }
+            });
+
+            // 3. Top Merchants Horizontal Bar Chart
+            const haendlerCtx = document.getElementById('chart-haendler').getContext('2d');
+            if (chartHaendler) chartHaendler.destroy();
+
+            chartHaendler = new Chart(haendlerCtx, {
+                type: 'bar',
+                data: {
+                    labels: data.haendler.map(h => h.name.length > 25 ? h.name.slice(0, 25) + '...' : h.name),
+                    datasets: [{
+                        label: 'Umsatz',
+                        data: data.haendler.map(h => h.summe),
+                        backgroundColor: '#1976d2'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    indexAxis: 'y',
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: (ctx) => {
+                                    const h = data.haendler[ctx.dataIndex];
+                                    return `${h.summe.toLocaleString('de-DE', {style: 'currency', currency: 'EUR'})} (${h.anzahl}x)`;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            beginAtZero: true,
+                            ticks: {
+                                callback: (value) => value.toLocaleString('de-DE') + ' €'
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // =============================================================================
+        // End Dashboard Functions
+        // =============================================================================
+
+        // =============================================================================
+        // Belege Functions
+        // =============================================================================
+
+        let belegeCurrentOffset = 0;
+        const belegeLimit = 25;
+        let belegeSortBy = 'datum';
+        let belegeSortOrder = 'desc';
+
+        function sortBelege(column) {
+            // Toggle order if same column, otherwise default to desc
+            if (belegeSortBy === column) {
+                belegeSortOrder = belegeSortOrder === 'desc' ? 'asc' : 'desc';
+            } else {
+                belegeSortBy = column;
+                belegeSortOrder = 'desc';
+            }
+            // Reset to first page when sorting changes
+            loadBelege(0);
+        }
+
+        function updateSortIcons() {
+            // Reset all icons
+            ['datum', 'haendler', 'betrag', 'konto', 'status'].forEach(col => {
+                const icon = document.getElementById(`sort-icon-${col}`);
+                if (icon) {
+                    if (col === belegeSortBy) {
+                        icon.textContent = belegeSortOrder === 'desc' ? 'arrow_downward' : 'arrow_upward';
+                        icon.style.color = '#1976d2';
+                    } else {
+                        icon.textContent = 'unfold_more';
+                        icon.style.color = '#9e9e9e';
+                    }
+                }
+            });
+        }
+
+        function toggleBelege() {
+            const belege = document.getElementById('belege-section');
+            const main = document.getElementById('main-section');
+            const dashboard = document.getElementById('dashboard-section');
+
+            if (belege.style.display === 'none') {
+                belege.style.display = 'block';
+                main.style.display = 'none';
+                dashboard.style.display = 'none';
+                initBelegeFilters();
+                loadBelege();
+            } else {
+                belege.style.display = 'none';
+                main.style.display = 'block';
+            }
+        }
+
+        function initBelegeFilters() {
+            // Populate konto select
+            const belegeKonto = document.getElementById('belege-konto');
+            const mainKonto = document.getElementById('konto-select');
+            belegeKonto.innerHTML = '<option value="">Alle Konten</option>' +
+                Array.from(mainKonto.options).slice(1).map(o => o.outerHTML).join('');
+            M.FormSelect.init(belegeKonto);
+
+            // Init datepickers
+            const datepickers = document.querySelectorAll('#belege-section .datepicker');
+            M.Datepicker.init(datepickers, {
+                format: 'yyyy-mm-dd',
+                autoClose: true,
+                i18n: {
+                    months: ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'],
+                    monthsShort: ['Jan', 'Feb', 'Mär', 'Apr', 'Mai', 'Jun', 'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez'],
+                    weekdays: ['Sonntag', 'Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag'],
+                    weekdaysShort: ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'],
+                    weekdaysAbbrev: ['S', 'M', 'D', 'M', 'D', 'F', 'S'],
+                    cancel: 'Abbrechen',
+                    done: 'OK'
+                }
+            });
+
+            M.FormSelect.init(document.getElementById('belege-status'));
+        }
+
+        async function loadBelege(offset = 0) {
+            belegeCurrentOffset = offset;
+            const kontoId = document.getElementById('belege-konto').value;
+            const von = document.getElementById('belege-von').value;
+            const bis = document.getElementById('belege-bis').value;
+            const status = document.getElementById('belege-status').value;
+
+            let url = `/api/belege?limit=${belegeLimit}&offset=${offset}`;
+            url += `&sort_by=${belegeSortBy}&sort_order=${belegeSortOrder}`;
+            if (kontoId) url += `&konto_id=${kontoId}`;
+            if (von) url += `&von=${von}`;
+            if (bis) url += `&bis=${bis}`;
+            if (status) url += `&status=${status}`;
+
+            try {
+                const data = await api(url);
+                renderBelegeTable(data);
+                updateSortIcons();
+            } catch (error) {
+                console.error('Error loading belege:', error);
+                M.toast({html: 'Fehler beim Laden der Belege'});
+            }
+        }
+
+        function renderBelegeTable(data) {
+            const tbody = document.getElementById('belege-table-body');
+
+            if (!data.belege || data.belege.length === 0) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="6" class="center-align grey-text" style="padding: 40px;">
+                            <i class="material-icons" style="font-size: 48px;">inbox</i><br>
+                            Keine Belege gefunden.
+                        </td>
+                    </tr>`;
+                document.getElementById('belege-pagination-info').textContent = '';
+                document.getElementById('belege-pagination').innerHTML = '';
+                return;
+            }
+
+            tbody.innerHTML = data.belege.map(b => {
+                const datum = b.display_datum ? formatDate(b.display_datum) : '-';
+                const haendler = b.display_haendler || '-';
+                const haendlerShort = haendler.length > 30 ? haendler.slice(0, 30) + '...' : haendler;
+                const betrag = b.display_betrag ? b.display_betrag.toLocaleString('de-DE', {style: 'currency', currency: 'EUR'}) : '-';
+                const konto = b.konto_name || '-';
+                const statusIcon = b.status === 'zugeordnet'
+                    ? '<i class="material-icons tiny green-text">check_circle</i> Zugeordnet'
+                    : '<i class="material-icons tiny orange-text">warning</i> Offen';
+
+                return `
+                    <tr>
+                        <td>${datum}</td>
+                        <td title="${haendler}">${haendlerShort}</td>
+                        <td class="right-align">${betrag}</td>
+                        <td>${konto}</td>
+                        <td>${statusIcon}</td>
+                        <td class="center-align">
+                            <a href="/api/belege/${b.id}/download" target="_blank" class="btn-flat btn-small" title="Beleg anzeigen">
+                                <i class="material-icons">visibility</i>
+                            </a>
+                        </td>
+                    </tr>`;
+            }).join('');
+
+            // Pagination info
+            const start = data.offset + 1;
+            const end = Math.min(data.offset + data.belege.length, data.total);
+            document.getElementById('belege-pagination-info').textContent =
+                `Zeige ${start}-${end} von ${data.total} Belegen`;
+
+            // Pagination controls
+            renderBelegePagination(data.total, data.offset, data.limit);
+        }
+
+        function renderBelegePagination(total, offset, limit) {
+            const pagination = document.getElementById('belege-pagination');
+            const totalPages = Math.ceil(total / limit);
+            const currentPage = Math.floor(offset / limit) + 1;
+
+            if (totalPages <= 1) {
+                pagination.innerHTML = '';
+                return;
+            }
+
+            let html = '';
+
+            // Previous
+            html += `<li class="${currentPage === 1 ? 'disabled' : 'waves-effect'}">
+                <a href="#!" onclick="${currentPage > 1 ? `loadBelege(${(currentPage - 2) * limit})` : ''}">
+                    <i class="material-icons">chevron_left</i>
+                </a>
+            </li>`;
+
+            // Page numbers (show max 5)
+            let startPage = Math.max(1, currentPage - 2);
+            let endPage = Math.min(totalPages, startPage + 4);
+            if (endPage - startPage < 4) startPage = Math.max(1, endPage - 4);
+
+            for (let i = startPage; i <= endPage; i++) {
+                html += `<li class="${i === currentPage ? 'active' : 'waves-effect'}">
+                    <a href="#!" onclick="loadBelege(${(i - 1) * limit})">${i}</a>
+                </li>`;
+            }
+
+            // Next
+            html += `<li class="${currentPage === totalPages ? 'disabled' : 'waves-effect'}">
+                <a href="#!" onclick="${currentPage < totalPages ? `loadBelege(${currentPage * limit})` : ''}">
+                    <i class="material-icons">chevron_right</i>
+                </a>
+            </li>`;
+
+            pagination.innerHTML = html;
+        }
+
+        function formatDate(dateStr) {
+            if (!dateStr) return '-';
+            const parts = dateStr.split('-');
+            if (parts.length === 3) {
+                return `${parts[2]}.${parts[1]}.${parts[0].slice(2)}`;
+            }
+            return dateStr;
+        }
+
+        // =============================================================================
+        // End Belege Functions
+        // =============================================================================
+
+        // Load statements for account
+        async function loadAbrechnungen() {
+            const kontoId = document.getElementById('konto-select').value;
+            if (!kontoId) return;
+
+            const abrechnungen = await api(`/api/abrechnungen?konto_id=${kontoId}`);
+            const select = document.getElementById('abrechnung-select');
+
+            const options = abrechnungen.map(a =>
+                `<option value="${a.id}">${a.periode} (${a.status})</option>`
+            ).join('');
+
+            select.innerHTML = '<option value="">Abrechnung wählen...</option>' + options;
+            M.FormSelect.init(select);
+        }
+
+        // Load statement details
+        let currentAbrechnungData = null;
+        async function loadAbrechnung() {
+            const abrechnungId = document.getElementById('abrechnung-select').value;
+            if (!abrechnungId) {
+                document.getElementById('stats-row').style.display = 'none';
+                document.getElementById('mini-stats-row').style.display = 'none';
+                document.getElementById('view-abrechnung-btn').style.display = 'none';
+                return;
+            }
+
+            const data = await api(`/api/abrechnungen/${abrechnungId}`);
+            currentAbrechnungData = data;
+
+            // Update stats
+            document.getElementById('stats-row').style.display = 'flex';
+            document.getElementById('stat-total').textContent = data.statistik.total || 0;
+            document.getElementById('stat-zugeordnet').textContent = data.statistik.zugeordnet || 0;
+            document.getElementById('stat-offen').textContent = data.statistik.offen || 0;
+            document.getElementById('stat-summe').textContent =
+                (data.statistik.summe || 0).toFixed(2) + ' €';
+
+            // Show/hide PDF button based on whether file exists
+            const pdfBtn = document.getElementById('view-abrechnung-btn');
+            const uploadBtn = document.getElementById('upload-abrechnung-btn');
+            if (data.datei_pfad) {
+                pdfBtn.style.display = 'inline-block';
+                uploadBtn.style.display = 'none';
+            } else {
+                pdfBtn.style.display = 'none';
+                uploadBtn.style.display = 'inline-block';
+            }
+
+            // Show delete and export buttons when statement is selected
+            document.getElementById('delete-abrechnung-btn').style.display = 'inline-block';
+            document.getElementById('export-list-btn').style.display = 'inline-block';
+            document.getElementById('export-zip-btn').style.display = 'inline-block';
+
+            // Load transactions and mini-stats
+            loadTransaktionen(abrechnungId);
+            document.getElementById('mini-stats-row').style.display = 'flex';
+        }
+
+        // Calculate and display mini-stats for current statement
+        function updateMiniStats(transaktionen) {
+            // 1. Category breakdown
+            const kategorien = {};
+            let total = 0;
+            transaktionen.forEach(t => {
+                const kat = t.kategorie || 'sonstiges';
+                kategorien[kat] = (kategorien[kat] || 0) + Math.abs(t.betrag);
+                total += Math.abs(t.betrag);
+            });
+
+            const sortedKat = Object.entries(kategorien)
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 4);
+
+            const katHtml = sortedKat.map(([name, summe]) => {
+                const prozent = total > 0 ? Math.round((summe / total) * 100) : 0;
+                const label = name.replace('_', ' ').replace(/^\w/, c => c.toUpperCase());
+                return `<div style="display: flex; justify-content: space-between; margin: 4px 0;">
+                    <span>${label}</span>
+                    <span class="grey-text">${prozent}%</span>
+                </div>`;
+            }).join('');
+            document.getElementById('mini-kategorien').innerHTML = katHtml || '<span class="grey-text">Keine Daten</span>';
+
+            // 2. Top merchants
+            const haendler = {};
+            transaktionen.forEach(t => {
+                if (t.haendler) {
+                    haendler[t.haendler] = (haendler[t.haendler] || 0) + Math.abs(t.betrag);
+                }
+            });
+
+            const sortedHaendler = Object.entries(haendler)
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 3);
+
+            const haendlerHtml = sortedHaendler.map(([name, summe]) => {
+                const shortName = name.length > 20 ? name.slice(0, 20) + '...' : name;
+                return `<div style="display: flex; justify-content: space-between; margin: 4px 0;">
+                    <span>${shortName}</span>
+                    <span class="grey-text">${summe.toFixed(0)} €</span>
+                </div>`;
+            }).join('');
+            document.getElementById('mini-haendler').innerHTML = haendlerHtml || '<span class="grey-text">Keine Daten</span>';
+
+            // 3. Receipt status
+            const mitBeleg = transaktionen.filter(t => t.status === 'zugeordnet').length;
+            const ohneBeleg = transaktionen.filter(t => t.status === 'offen').length;
+            const ignoriert = transaktionen.filter(t => t.status === 'ignoriert').length;
+
+            const statusHtml = `
+                <div style="display: flex; justify-content: space-between; margin: 4px 0;">
+                    <span><i class="material-icons tiny green-text">check_circle</i> Mit Beleg</span>
+                    <span>${mitBeleg}</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; margin: 4px 0;">
+                    <span><i class="material-icons tiny orange-text">warning</i> Ohne Beleg</span>
+                    <span>${ohneBeleg}</span>
+                </div>
+                ${ignoriert > 0 ? `<div style="display: flex; justify-content: space-between; margin: 4px 0;">
+                    <span><i class="material-icons tiny grey-text">block</i> Ignoriert</span>
+                    <span>${ignoriert}</span>
+                </div>` : ''}
+            `;
+            document.getElementById('mini-status').innerHTML = statusHtml;
+        }
+
+        // Export transaction list as PDF
+        function exportTransaktionsliste() {
+            const abrechnungId = document.getElementById('abrechnung-select').value;
+            if (!abrechnungId) return;
+
+            // Download PDF directly
+            window.location.href = `/api/abrechnungen/${abrechnungId}/export`;
+        }
+
+        // Export complete ZIP (statement, receipts, report)
+        function exportZip() {
+            const abrechnungId = document.getElementById('abrechnung-select').value;
+            if (!abrechnungId) return;
+
+            M.toast({html: 'ZIP wird erstellt...'});
+            window.location.href = `/api/abrechnungen/${abrechnungId}/export-zip`;
+        }
+
+        // Delete the current statement
+        async function deleteAbrechnung() {
+            const abrechnungId = document.getElementById('abrechnung-select').value;
+            if (!abrechnungId) return;
+
+            const periode = currentAbrechnungData?.periode || '';
+            if (!confirm(`Abrechnung "${periode}" wirklich löschen?\n\nAlle Transaktionen werden ebenfalls gelöscht!`)) {
+                return;
+            }
+
+            const response = await fetch(`/api/abrechnungen/${abrechnungId}`, {
+                method: 'DELETE'
+            });
+
+            const result = await response.json();
+            if (result.error) {
+                M.toast({html: result.error, classes: 'red'});
+            } else {
+                M.toast({html: 'Abrechnung gelöscht'});
+
+                // Reset UI
+                document.getElementById('abrechnung-select').value = '';
+                document.getElementById('stats-row').style.display = 'none';
+                document.getElementById('mini-stats-row').style.display = 'none';
+                document.getElementById('delete-abrechnung-btn').style.display = 'none';
+                document.getElementById('view-abrechnung-btn').style.display = 'none';
+                document.getElementById('upload-abrechnung-btn').style.display = 'none';
+                document.getElementById('export-list-btn').style.display = 'none';
+                document.getElementById('export-zip-btn').style.display = 'none';
+                document.getElementById('transaktionen-liste').innerHTML = `
+                    <div class="empty-state">
+                        <i class="material-icons">receipt_long</i>
+                        <p>Wählen Sie eine Abrechnung aus oder importieren Sie eine neue.</p>
+                    </div>`;
+                transaktionen = [];
+                currentAbrechnungData = null;
+
+                // Reload statements list
+                loadAbrechnungen();
+            }
+        }
+
+        // View the original statement PDF
+        function viewAbrechnung() {
+            const abrechnungId = document.getElementById('abrechnung-select').value;
+            if (!abrechnungId || !currentAbrechnungData) return;
+
+            const filename = currentAbrechnungData.datei_name || 'Abrechnung.pdf';
+            openPdfViewerUrl(`/api/abrechnungen/${abrechnungId}/download`, filename);
+        }
+
+        // Upload PDF for existing statement
+        async function uploadAbrechnungPdf(input) {
+            const abrechnungId = document.getElementById('abrechnung-select').value;
+            if (!abrechnungId || !input.files.length) return;
+
+            const formData = new FormData();
+            formData.append('file', input.files[0]);
+
+            M.toast({html: 'PDF wird hochgeladen...'});
+
+            const response = await fetch(`/api/abrechnungen/${abrechnungId}/upload-pdf`, {
+                method: 'POST',
+                body: formData
+            });
+
+            const result = await response.json();
+            if (result.error) {
+                M.toast({html: result.error, classes: 'red'});
+            } else {
+                M.toast({html: 'PDF hochgeladen!'});
+                loadAbrechnung(); // Refresh to show PDF button
+            }
+
+            input.value = ''; // Reset input
+        }
+
+        // Load transactions
+        async function loadTransaktionen(abrechnungId) {
+            transaktionen = await api(`/api/transaktionen?abrechnung_id=${abrechnungId}`);
+            renderTransaktionen();
+            updateMiniStats(transaktionen);
+        }
+
+        // Render transactions grouped by category
+        function renderTransaktionen() {
+            const container = document.getElementById('transaktionen-liste');
+
+            if (!transaktionen.length) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <i class="material-icons">receipt_long</i>
+                        <p>Keine Transaktionen gefunden.</p>
+                    </div>`;
+                return;
+            }
+
+            // Group by category
+            const grouped = {};
+            transaktionen.forEach(t => {
+                const kat = t.kategorie || 'nicht_kategorisiert';
+                if (!grouped[kat]) grouped[kat] = [];
+                grouped[kat].push(t);
+            });
+
+            let html = '<ul class="collapsible">';
+
+            for (const [kat, items] of Object.entries(grouped)) {
+                const katName = kategorien[kat] || kat;
+                const summe = items.reduce((s, t) => s + (t.betrag_eur || t.betrag), 0);
+
+                html += `
+                    <li>
+                        <div class="collapsible-header" style="display: flex; align-items: center;">
+                            <i class="material-icons">folder</i>
+                            <span style="flex: 1;">${katName}</span>
+                            <span style="min-width: 40px; text-align: center; color: #9e9e9e;">${items.length}</span>
+                            <span style="min-width: 100px; text-align: right; margin-right: 8px;">${summe.toFixed(2)} €</span>
+                        </div>
+                        <div class="collapsible-body" style="padding: 0;">`;
+
+                items.forEach(t => {
+                    const statusClass = `status-${t.status}`;
+                    const statusIcon = t.status === 'zugeordnet' ? 'check_circle' :
+                                      t.status === 'ignoriert' ? 'cancel' : 'radio_button_unchecked';
+                    const posNr = t.position ? String(t.position).padStart(2, '0') : '--';
+                    const showBewirtung = isRestaurantTransaction(t);
+
+                    html += `
+                        <div class="transaction-row" onclick="openTransaktion(${t.id})">
+                            <span class="transaction-pos" style="width: 30px; text-align: center; font-weight: bold; color: #1565c0;">${posNr}</span>
+                            <span class="transaction-date">${formatDate(t.datum)}</span>
+                            <span class="transaction-desc">
+                                <strong>${t.haendler || ''}</strong><br>
+                                <small>${t.beschreibung || ''}</small>
+                            </span>
+                            <span class="transaction-amount">${(t.betrag_eur || t.betrag).toFixed(2)} €</span>
+                            <span class="transaction-status">
+                                <i class="material-icons tiny ${statusClass}">${statusIcon}</i>
+                                ${t.beleg_datei ? '<i class="material-icons tiny">attachment</i>' : ''}
+                                ${showBewirtung ? `<a class="btn-flat btn-small" onclick="event.stopPropagation(); openBewirtungsbeleg(${t.id})" title="Bewirtungsbeleg"><i class="material-icons tiny">receipt_long</i></a>` : ''}
+                            </span>
+                        </div>`;
+                });
+
+                html += '</div></li>';
+            }
+
+            html += '</ul>';
+            container.innerHTML = html;
+
+            M.Collapsible.init(document.querySelectorAll('.collapsible'));
+        }
+
+        // Load categories
+        async function loadKategorien() {
+            kategorien = await api('/api/kategorien');
+
+            const select = document.getElementById('detail-kategorie');
+            let options = '<option value="">Kategorie wählen...</option>';
+            for (const [key, desc] of Object.entries(kategorien)) {
+                options += `<option value="${key}">${desc}</option>`;
+            }
+            select.innerHTML = options;
+        }
+
+        // Load unassigned receipts
+        async function loadUnzugeordneteBelege() {
+            const belege = await api('/api/belege?unzugeordnet=true');
+            const container = document.getElementById('unzugeordnete-belege');
+
+            if (!belege.length) {
+                container.innerHTML = '<p class="grey-text center">Keine unzugeordneten Belege</p>';
+                return;
+            }
+
+            let html = '<ul class="collection">';
+            belege.forEach(b => {
+                const data = JSON.parse(b.extrahierte_daten || '{}');
+                const isPdf = b.datei_name.toLowerCase().endsWith('.pdf');
+                html += `
+                    <li class="collection-item">
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <i class="material-icons grey-text">${isPdf ? 'picture_as_pdf' : 'image'}</i>
+                            <div style="flex: 1; min-width: 0; cursor: pointer;" onclick="${isPdf ? `openPdfViewer(${b.id}, '${b.datei_name.replace(/'/g, "\\'")}')` : ''}">
+                                <span class="title truncate" style="display: block;">${b.datei_name}</span>
+                                <p style="margin: 0;">
+                                    ${data.betrag ? data.betrag.toFixed(2) + ' €' : ''}
+                                    ${data.datum || ''}<br>
+                                    <small class="grey-text">${data.haendler || ''}</small>
+                                </p>
+                            </div>
+                            ${isPdf ? `<a class="btn-flat btn-small waves-effect" onclick="openPdfViewer(${b.id}, '${b.datei_name.replace(/'/g, "\\'")}')"><i class="material-icons">visibility</i></a>` : ''}
+                            <a class="btn-flat btn-small waves-effect red-text" onclick="deleteBeleg(${b.id}, '${b.datei_name.replace(/'/g, "\\'")}')" title="Beleg löschen"><i class="material-icons">delete</i></a>
+                        </div>
+                    </li>`;
+            });
+            html += '</ul>';
+            container.innerHTML = html;
+        }
+
+        // Open transaction detail
+        async function openTransaktion(id) {
+            currentTransaktionId = id;
+            const t = transaktionen.find(x => x.id === id);
+            if (!t) return;
+
+            document.getElementById('transaktion-title').textContent = t.haendler || 'Transaktion';
+            document.getElementById('detail-datum').textContent = formatDate(t.datum);
+            document.getElementById('detail-betrag').textContent = (t.betrag_eur || t.betrag).toFixed(2) + ' €';
+            document.getElementById('detail-haendler').textContent = t.haendler || '-';
+            document.getElementById('detail-beschreibung').textContent = t.beschreibung || '-';
+            document.getElementById('detail-status').textContent = t.status;
+
+            document.getElementById('detail-kategorie').value = t.kategorie || '';
+            document.getElementById('detail-status-select').value = t.status || 'offen';
+            document.getElementById('detail-notizen').value = t.notizen || '';
+
+            M.FormSelect.init(document.querySelectorAll('#transaktion-modal select'));
+            M.textareaAutoResize(document.getElementById('detail-notizen'));
+            M.updateTextFields();
+
+            // Load attached receipt if exists
+            const attachedDiv = document.getElementById('attached-beleg');
+            const suggestionsDiv = document.getElementById('match-suggestions');
+
+            const manualDiv = document.getElementById('manual-assignment');
+
+            if (t.beleg_id) {
+                // Show attached receipt
+                attachedDiv.style.display = 'block';
+                suggestionsDiv.style.display = 'none';
+                manualDiv.style.display = 'none';
+
+                const beleg = await api(`/api/belege/${t.beleg_id}`);
+                if (beleg) {
+                    const data = beleg.extrahierte_daten ? JSON.parse(beleg.extrahierte_daten) : {};
+                    const isPdf = beleg.datei_name.toLowerCase().endsWith('.pdf');
+                    document.getElementById('beleg-preview').innerHTML = `
+                        <div style="display: flex; align-items: center; gap: 15px;">
+                            <i class="material-icons" style="font-size: 40px; color: #1565c0;">${isPdf ? 'picture_as_pdf' : 'image'}</i>
+                            <div style="flex: 1;">
+                                <strong>${beleg.datei_name}</strong><br>
+                                <span class="grey-text">${data.haendler || ''} - ${data.betrag ? data.betrag.toFixed(2) + ' €' : ''}</span>
+                            </div>
+                            ${isPdf ? `<a class="btn-flat waves-effect" onclick="openPdfViewer(${beleg.id}, '${beleg.datei_name.replace(/'/g, "\\'")}')"><i class="material-icons">visibility</i></a>` : ''}
+                            <a class="btn-flat waves-effect red-text" onclick="unlinkBeleg(${beleg.id})" title="Zuordnung aufheben"><i class="material-icons">link_off</i></a>
+                        </div>
+                    `;
+                }
+            } else {
+                // Show matching suggestions and manual assignment
+                attachedDiv.style.display = 'none';
+                suggestionsDiv.style.display = 'block';
+                manualDiv.style.display = 'block';
+                await loadMatchingSuggestions(t);
+                await loadManualBelegSelect();
+            }
+
+            const modal = M.Modal.getInstance(document.getElementById('transaktion-modal'));
+            modal.open();
+        }
+
+        // Load matching suggestions for a transaction
+        async function loadMatchingSuggestions(transaktion) {
+            const container = document.getElementById('suggestions-list');
+            container.innerHTML = '<div class="center-align grey-text" style="padding: 20px;"><div class="preloader-wrapper small active"><div class="spinner-layer spinner-blue-only"><div class="circle-clipper left"><div class="circle"></div></div></div></div></div>';
+
+            // Get unassigned receipts
+            const belege = await api('/api/belege?unzugeordnet=true');
+
+            if (!belege.length) {
+                container.innerHTML = '<p class="grey-text center">Keine unzugeordneten Belege verfügbar</p>';
+                return;
+            }
+
+            // Calculate match scores client-side
+            const tBetrag = transaktion.betrag_eur || transaktion.betrag || 0;
+            const tDatum = transaktion.datum ? new Date(transaktion.datum) : null;
+            const tDesc = (transaktion.beschreibung || '').toLowerCase();
+            const tHaendler = (transaktion.haendler || '').toLowerCase();
+
+            const scored = belege.map(b => {
+                const data = JSON.parse(b.extrahierte_daten || '{}');
+                let score = 0;
+                let reasons = [];
+
+                // Amount match (max 50 points)
+                const bBetrag = data.betrag || 0;
+                if (bBetrag > 0 && tBetrag > 0) {
+                    const diff = Math.abs(tBetrag - bBetrag);
+                    if (diff < 0.01) { score += 50; reasons.push('Betrag exakt'); }
+                    else if (diff < 1) { score += 40; reasons.push('Betrag ~gleich'); }
+                    else if (diff < 5) { score += 20; reasons.push('Betrag ähnlich'); }
+                }
+
+                // Date match (max 30 points)
+                if (data.datum && tDatum) {
+                    const bDatum = parseGermanDate(data.datum);
+                    if (bDatum) {
+                        const daysDiff = Math.abs((tDatum - bDatum) / (1000 * 60 * 60 * 24));
+                        if (daysDiff <= 1) { score += 30; reasons.push('Datum passt'); }
+                        else if (daysDiff <= 3) { score += 20; reasons.push('Datum nah'); }
+                        else if (daysDiff <= 7) { score += 10; }
+                    }
+                }
+
+                // Vendor match (max 20 points)
+                const bHaendler = (data.haendler || '').toLowerCase();
+                if (bHaendler && (tDesc.includes(bHaendler.substring(0, 5)) || tHaendler.includes(bHaendler.substring(0, 5)) ||
+                    bHaendler.includes(tHaendler.substring(0, 5)))) {
+                    score += 20;
+                    reasons.push('Händler ähnlich');
+                }
+
+                return { beleg: b, data, score, reasons };
+            });
+
+            // Sort by score and take top 5
+            const matches = scored.filter(m => m.score > 0).sort((a, b) => b.score - a.score).slice(0, 5);
+
+            if (!matches.length) {
+                container.innerHTML = '<p class="grey-text center">Keine passenden Belege gefunden</p>';
+                return;
+            }
+
+            let html = '<ul class="collection">';
+            matches.forEach(m => {
+                const isPdf = m.beleg.datei_name.toLowerCase().endsWith('.pdf');
+                const scoreColor = m.score >= 70 ? '#4caf50' : m.score >= 40 ? '#ff9800' : '#9e9e9e';
+                html += `
+                    <li class="collection-item">
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <i class="material-icons grey-text">${isPdf ? 'picture_as_pdf' : 'image'}</i>
+                            <div style="flex: 1; min-width: 0;">
+                                <span class="title truncate" style="display: block;">${m.beleg.datei_name}</span>
+                                <p style="margin: 0;">
+                                    ${m.data.betrag ? m.data.betrag.toFixed(2) + ' €' : ''}
+                                    ${m.data.datum || ''}<br>
+                                    <small class="grey-text">${m.data.haendler || ''}</small><br>
+                                    <small style="color: ${scoreColor};">${m.reasons.join(', ')}</small>
+                                </p>
+                            </div>
+                            <div style="display: flex; gap: 5px;">
+                                ${isPdf ? `<a class="btn-flat btn-small waves-effect" onclick="openPdfViewer(${m.beleg.id}, '${m.beleg.datei_name.replace(/'/g, "\\'")}')"><i class="material-icons">visibility</i></a>` : ''}
+                                <a class="btn btn-small waves-effect waves-light green" onclick="assignBeleg(${m.beleg.id})"><i class="material-icons">check</i></a>
+                            </div>
+                        </div>
+                    </li>`;
+            });
+            html += '</ul>';
+            container.innerHTML = html;
+        }
+
+        // Parse German date format
+        function parseGermanDate(dateStr) {
+            if (!dateStr) return null;
+            const parts = dateStr.split('.');
+            if (parts.length >= 3) {
+                let year = parseInt(parts[2]);
+                if (year < 100) year += 2000;
+                return new Date(year, parseInt(parts[1]) - 1, parseInt(parts[0]));
+            }
+            return null;
+        }
+
+        // Assign a receipt to the current transaction
+        async function assignBeleg(belegId) {
+            if (!currentTransaktionId) return;
+
+            await api(`/api/belege/${belegId}/zuordnen`, {
+                method: 'POST',
+                body: JSON.stringify({
+                    transaktion_id: currentTransaktionId,
+                    match_typ: 'manuell',
+                    confidence: 1.0
+                })
+            });
+
+            M.toast({html: 'Beleg zugeordnet!'});
+
+            // Refresh
+            const abrechnungId = document.getElementById('abrechnung-select').value;
+            if (abrechnungId) {
+                await loadAbrechnung();
+            }
+            loadUnzugeordneteBelege();
+
+            // Close modal
+            M.Modal.getInstance(document.getElementById('transaktion-modal')).close();
+        }
+
+        // Auto-match all unassigned receipts
+        async function autoMatchAllBelege() {
+            const abrechnungId = document.getElementById('abrechnung-select').value;
+
+            M.toast({html: 'Starte automatische Zuordnung...'});
+
+            try {
+                const result = await api('/api/belege/auto-match', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        abrechnung_id: abrechnungId || null,
+                        threshold: 0.5
+                    })
+                });
+
+                if (result.matches_found > 0) {
+                    M.toast({html: `${result.matches_found} Beleg(e) zugeordnet!`, classes: 'green'});
+                } else {
+                    M.toast({html: 'Keine passenden Zuordnungen gefunden', classes: 'orange'});
+                }
+
+                // Refresh views
+                if (abrechnungId) {
+                    await loadAbrechnung();
+                }
+                loadUnzugeordneteBelege();
+
+            } catch (err) {
+                M.toast({html: 'Fehler bei der Zuordnung: ' + err.message, classes: 'red'});
+            }
+        }
+
+        // Load all unassigned receipts for manual selection
+        let allUnassignedBelege = [];
+        async function loadManualBelegSelect() {
+            const select = document.getElementById('manual-beleg-select');
+            allUnassignedBelege = await api('/api/belege?unzugeordnet=true');
+
+            let options = '<option value="">Beleg auswählen...</option>';
+            allUnassignedBelege.forEach(b => {
+                const data = JSON.parse(b.extrahierte_daten || '{}');
+                const betrag = data.betrag ? `${data.betrag.toFixed(2)}€` : '';
+                const haendler = data.haendler || '';
+                const datum = data.datum || '';
+                const label = `${b.datei_name} ${betrag ? '- ' + betrag : ''} ${haendler ? '(' + haendler + ')' : ''} ${datum}`;
+                options += `<option value="${b.id}">${label}</option>`;
+            });
+
+            select.innerHTML = options;
+            M.FormSelect.init(select);
+
+            // Add change listener for preview
+            select.removeEventListener('change', showManualBelegPreview);
+            select.addEventListener('change', showManualBelegPreview);
+
+            // Clear preview
+            document.getElementById('manual-beleg-preview').style.display = 'none';
+        }
+
+        function showManualBelegPreview() {
+            const belegId = document.getElementById('manual-beleg-select').value;
+            const previewDiv = document.getElementById('manual-beleg-preview');
+
+            if (!belegId) {
+                previewDiv.style.display = 'none';
+                return;
+            }
+
+            const beleg = allUnassignedBelege.find(b => b.id == belegId);
+            if (!beleg) {
+                previewDiv.style.display = 'none';
+                return;
+            }
+
+            const data = JSON.parse(beleg.extrahierte_daten || '{}');
+            const isPdf = beleg.datei_name.toLowerCase().endsWith('.pdf');
+
+            previewDiv.innerHTML = `
+                <div style="display: flex; align-items: center; gap: 15px;">
+                    <i class="material-icons grey-text" style="font-size: 36px;">${isPdf ? 'picture_as_pdf' : 'image'}</i>
+                    <div style="flex: 1;">
+                        <strong>${beleg.datei_name}</strong><br>
+                        <span>${data.betrag ? data.betrag.toFixed(2) + ' €' : '-'}</span> |
+                        <span>${data.datum || '-'}</span><br>
+                        <small class="grey-text">${data.haendler || '-'}</small>
+                    </div>
+                    ${isPdf ? `<a class="btn-flat btn-small waves-effect" onclick="openPdfViewer(${beleg.id}, '${beleg.datei_name.replace(/'/g, "\\'")}')"><i class="material-icons">visibility</i></a>` : ''}
+                </div>
+            `;
+            previewDiv.style.display = 'block';
+        }
+
+        async function manualAssignBeleg() {
+            const belegId = document.getElementById('manual-beleg-select').value;
+            if (!belegId) {
+                M.toast({html: 'Bitte einen Beleg auswählen'});
+                return;
+            }
+            if (!currentTransaktionId) {
+                M.toast({html: 'Keine Transaktion ausgewählt'});
+                return;
+            }
+
+            await assignBeleg(parseInt(belegId));
+        }
+
+        // Unlink a receipt from transaction
+        async function unlinkBeleg(belegId) {
+            if (!confirm('Zuordnung wirklich aufheben?')) return;
+
+            await api(`/api/belege/${belegId}/zuordnen`, {
+                method: 'POST',
+                body: JSON.stringify({
+                    transaktion_id: null,
+                    match_typ: null,
+                    confidence: null
+                })
+            });
+
+            M.toast({html: 'Zuordnung aufgehoben'});
+
+            // Refresh
+            const abrechnungId = document.getElementById('abrechnung-select').value;
+            if (abrechnungId) {
+                await loadAbrechnung();
+            }
+            loadUnzugeordneteBelege();
+
+            // Close modal
+            M.Modal.getInstance(document.getElementById('transaktion-modal')).close();
+        }
+
+        // Delete unassigned receipt
+        async function deleteBeleg(belegId, dateiName) {
+            if (!confirm(`Beleg "${dateiName}" wirklich löschen?\n\nDie Datei wird unwiderruflich gelöscht.`)) return;
+
+            try {
+                await api(`/api/belege/${belegId}`, { method: 'DELETE' });
+                M.toast({html: 'Beleg gelöscht', classes: 'green'});
+                loadUnzugeordneteBelege();
+            } catch (err) {
+                M.toast({html: 'Fehler beim Löschen: ' + err.message, classes: 'red'});
+            }
+        }
+
+        // Save transaction
+        async function saveTransaktion() {
+            if (!currentTransaktionId) return;
+
+            await api(`/api/transaktionen/${currentTransaktionId}`, {
+                method: 'PUT',
+                body: JSON.stringify({
+                    kategorie: document.getElementById('detail-kategorie').value,
+                    status: document.getElementById('detail-status-select').value,
+                    notizen: document.getElementById('detail-notizen').value
+                })
+            });
+
+            M.toast({html: 'Gespeichert!'});
+
+            const abrechnungId = document.getElementById('abrechnung-select').value;
+            if (abrechnungId) {
+                loadAbrechnung();
+            }
+        }
+
+        // Auto-categorize all
+        async function kategorisiereAlle() {
+            const abrechnungId = document.getElementById('abrechnung-select').value;
+            if (!abrechnungId) return;
+
+            const btn = document.getElementById('kategorisieren-btn');
+            const originalContent = btn.innerHTML;
+
+            // Show spinner
+            btn.innerHTML = '<div class="preloader-wrapper tiny active"><div class="spinner-layer spinner-blue-only"><div class="circle-clipper left"><div class="circle"></div></div></div></div>';
+            btn.style.pointerEvents = 'none';
+
+            try {
+                const result = await api('/api/transaktionen/kategorisieren-alle', {
+                    method: 'POST',
+                    body: JSON.stringify({ abrechnung_id: abrechnungId })
+                });
+
+                M.toast({html: `${result.kategorisiert} Transaktionen kategorisiert`, classes: 'green'});
+                loadAbrechnung();
+            } catch (error) {
+                M.toast({html: 'Fehler bei Kategorisierung: ' + error.message, classes: 'red'});
+            } finally {
+                // Restore button
+                btn.innerHTML = originalContent;
+                btn.style.pointerEvents = 'auto';
+            }
+        }
+
+        // Import statement
+        async function importAbrechnung() {
+            const kontoId = document.getElementById('import-konto').value;
+            const periode = document.getElementById('import-periode').value;
+            const fileInput = document.getElementById('import-input');
+
+            if (!kontoId) {
+                M.toast({html: 'Bitte Konto wählen'});
+                return;
+            }
+
+            if (!fileInput.files.length) {
+                M.toast({html: 'Bitte Datei wählen'});
+                return;
+            }
+
+            // Show loading state
+            const importBtn = document.querySelector('#import-modal .modal-footer .btn');
+            const originalBtnText = importBtn.innerHTML;
+            importBtn.innerHTML = '<div class="preloader-wrapper tiny active" style="margin-right: 8px;"><div class="spinner-layer spinner-white-only"><div class="circle-clipper left"><div class="circle"></div></div></div></div>Importiere...';
+            importBtn.style.pointerEvents = 'none';
+
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+            formData.append('konto_id', kontoId);
+            if (periode) formData.append('periode', periode);
+
+            try {
+                const response = await fetch('/api/abrechnungen/import', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const result = await response.json();
+
+                if (result.error) {
+                    M.toast({html: result.error, classes: 'red', displayLength: 5000});
+                } else {
+                    // Show success modal with details
+                    const gutschriften = result.gutschriften || 0;
+                    const successHtml = `
+                        <div style="text-align: center; padding: 20px;">
+                            <i class="material-icons" style="font-size: 64px; color: #4caf50;">check_circle</i>
+                            <h5>Import erfolgreich!</h5>
+                            <table class="centered" style="margin: 20px auto;">
+                                <tr><td style="text-align: right; padding-right: 15px;"><strong>Transaktionen:</strong></td><td style="text-align: left;">${result.transaktionen}</td></tr>
+                                ${gutschriften > 0 ? `<tr><td style="text-align: right; padding-right: 15px;"><strong>Gutschriften:</strong></td><td style="text-align: left;">${gutschriften}</td></tr>` : ''}
+                                <tr><td style="text-align: right; padding-right: 15px;"><strong>Gesamtbetrag:</strong></td><td style="text-align: left;">${result.gesamtbetrag.toFixed(2)} €</td></tr>
+                            </table>
+                        </div>
+                    `;
+
+                    document.querySelector('#import-modal .modal-content').innerHTML = successHtml;
+
+                    // Change button to close
+                    importBtn.innerHTML = 'Schließen';
+                    importBtn.style.pointerEvents = 'auto';
+                    importBtn.onclick = () => {
+                        M.Modal.getInstance(document.getElementById('import-modal')).close();
+                        // Reset modal content after close
+                        setTimeout(resetImportModal, 300);
+                    };
+
+                    document.getElementById('konto-select').value = kontoId;
+                    M.FormSelect.init(document.getElementById('konto-select'));
+                    await loadAbrechnungen();
+
+                    document.getElementById('abrechnung-select').value = result.id;
+                    M.FormSelect.init(document.getElementById('abrechnung-select'));
+                    loadAbrechnung();
+                }
+            } catch (error) {
+                M.toast({html: 'Fehler beim Import: ' + error.message, classes: 'red', displayLength: 5000});
+                importBtn.innerHTML = originalBtnText;
+                importBtn.style.pointerEvents = 'auto';
+            }
+        }
+
+        function resetImportModal() {
+            document.querySelector('#import-modal .modal-content').innerHTML = `
+                <h4>Abrechnung importieren <a href="#" onclick="showHelp('02-import'); return false;" class="grey-text" style="font-size: 1rem;"><i class="material-icons tiny">help_outline</i></a></h4>
+                <div class="row">
+                    <div class="input-field col s12 m6">
+                        <select id="import-konto">
+                            <option value="">Konto wählen...</option>
+                        </select>
+                        <label>Kreditkarte</label>
+                    </div>
+                    <div class="input-field col s12 m6">
+                        <input type="text" id="import-periode" placeholder="z.B. November 2025">
+                        <label for="import-periode" class="active">Periode (optional)</label>
+                    </div>
+                </div>
+                <div class="upload-zone" id="import-upload" onclick="document.getElementById('import-input').click()">
+                    <i class="material-icons">description</i>
+                    <p>CSV oder PDF hierher ziehen<br>oder klicken zum Auswählen</p>
+                    <input type="file" id="import-input" hidden accept=".csv,.pdf">
+                </div>
+                <p id="import-filename" style="text-align: center; margin-top: 10px;"></p>
+            `;
+
+            // Re-initialize
+            loadKonten();
+            setupDragDrop();
+
+            // Periodenvorschlag setzen
+            const periodeInput = document.getElementById('import-periode');
+            if (periodeInput) {
+                periodeInput.value = getDefaultPeriode();
+                M.updateTextFields();
+            }
+
+            const importBtn = document.querySelector('#import-modal .modal-footer .btn');
+            importBtn.innerHTML = 'Importieren';
+            importBtn.onclick = importAbrechnung;
+        }
+
+        // Create account
+        async function createKonto() {
+            const name = document.getElementById('konto-name').value;
+            if (!name) {
+                M.toast({html: 'Name erforderlich'});
+                return;
+            }
+
+            await api('/api/konten', {
+                method: 'POST',
+                body: JSON.stringify({
+                    name: name,
+                    bank: document.getElementById('konto-bank').value,
+                    kartennummer: document.getElementById('konto-nummer').value
+                })
+            });
+
+            M.toast({html: 'Konto erstellt'});
+            M.Modal.getInstance(document.getElementById('konto-modal')).close();
+            loadKonten();
+        }
+
+        // Upload receipt
+        async function uploadBeleg(file) {
+            const formData = new FormData();
+            formData.append('file', file);
+
+            M.toast({html: 'Beleg wird verarbeitet...'});
+
+            const response = await fetch('/api/belege/upload', {
+                method: 'POST',
+                body: formData
+            });
+
+            const result = await response.json();
+
+            if (result.error) {
+                M.toast({html: result.error, classes: 'red'});
+            } else {
+                M.toast({html: 'Beleg hochgeladen'});
+                loadUnzugeordneteBelege();
+            }
+        }
+
+        // Setup drag & drop
+        function setupDragDrop() {
+            const zones = ['beleg-upload', 'import-upload'];
+
+            zones.forEach(id => {
+                const zone = document.getElementById(id);
+                if (!zone) return;
+
+                zone.addEventListener('dragover', e => {
+                    e.preventDefault();
+                    zone.classList.add('drag-over');
+                });
+
+                zone.addEventListener('dragleave', () => {
+                    zone.classList.remove('drag-over');
+                });
+
+                zone.addEventListener('drop', e => {
+                    e.preventDefault();
+                    zone.classList.remove('drag-over');
+
+                    const files = e.dataTransfer.files;
+                    if (id === 'beleg-upload') {
+                        Array.from(files).forEach(uploadBeleg);
+                    } else {
+                        document.getElementById('import-input').files = files;
+                        document.getElementById('import-filename').textContent = files[0].name;
+                    }
+                });
+            });
+
+            // File input handlers
+            document.getElementById('beleg-input').addEventListener('change', e => {
+                Array.from(e.target.files).forEach(uploadBeleg);
+            });
+
+            document.getElementById('import-input').addEventListener('change', e => {
+                if (e.target.files.length) {
+                    document.getElementById('import-filename').textContent = e.target.files[0].name;
+                }
+            });
+        }
+
+        // Modal openers
+        function getDefaultPeriode() {
+            const monate = ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni',
+                           'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'];
+            const heute = new Date();
+            return `${monate[heute.getMonth()]} ${heute.getFullYear()}`;
+        }
+
+        function openImportModal() {
+            const periodeInput = document.getElementById('import-periode');
+            if (periodeInput && !periodeInput.value) {
+                periodeInput.value = getDefaultPeriode();
+                M.updateTextFields();
+            }
+            M.Modal.getInstance(document.getElementById('import-modal')).open();
+        }
+
+        function openNewKontoModal() {
+            M.Modal.getInstance(document.getElementById('konto-modal')).open();
+        }
+
+        // Signature state
+        let signatureBase64 = null;
+
+        function uploadSignature(input) {
+            const file = input.files[0];
+            if (!file) return;
+
+            if (!file.type.includes('png')) {
+                M.toast({ html: 'Bitte nur PNG-Dateien hochladen' });
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                signatureBase64 = e.target.result;
+                showSignaturePreview(signatureBase64);
+            };
+            reader.readAsDataURL(file);
+        }
+
+        function showSignaturePreview(base64) {
+            const preview = document.getElementById('signature-preview');
+            const container = document.getElementById('signature-preview-container');
+            preview.src = base64;
+            container.style.display = 'block';
+        }
+
+        function clearSignature() {
+            signatureBase64 = null;
+            document.getElementById('signature-preview-container').style.display = 'none';
+            document.getElementById('signature-upload').value = '';
+            document.querySelector('#settings-modal .file-path').value = '';
+        }
+
+        async function openSettings() {
+            // Load current settings
+            const settings = await api('/api/einstellungen');
+            if (settings) {
+                document.getElementById('settings-name').value = settings.name || '';
+                document.getElementById('settings-firma').value = settings.firma || '';
+                document.getElementById('settings-bewirtender').value = settings.bewirtender_name || '';
+
+                // Load existing signature
+                if (settings.unterschrift_base64) {
+                    signatureBase64 = settings.unterschrift_base64;
+                    showSignaturePreview(signatureBase64);
+                } else {
+                    clearSignature();
+                }
+
+                M.updateTextFields();
+            }
+            M.Modal.getInstance(document.getElementById('settings-modal')).open();
+        }
+
+        let hilfeKapitelGeladen = false;
+        let aktuellesKapitel = null;
+
+        async function showHelp(kapitelId = null) {
+            const modal = M.Modal.getInstance(document.getElementById('hilfe-modal'));
+            modal.open();
+
+            // Kapitel laden falls noch nicht geschehen
+            if (!hilfeKapitelGeladen) {
+                await ladeHilfeKapitel();
+            }
+
+            // Erstes Kapitel oder gewünschtes Kapitel anzeigen
+            const zielKapitel = kapitelId || '01-erste-schritte';
+            await ladeKapitelInhalt(zielKapitel);
+        }
+
+        async function ladeHilfeKapitel() {
+            try {
+                const response = await fetch('/api/hilfe/kapitel');
+                const kapitel = await response.json();
+
+                const liste = document.getElementById('hilfe-kapitel-list');
+                liste.innerHTML = kapitel.map((k, i) => `
+                    <li class="collection-item hilfe-kapitel-item" data-kapitel="${k.id}" onclick="ladeKapitelInhalt('${k.id}')" style="cursor: pointer;">
+                        <span class="badge">${i + 1}</span>
+                        ${k.titel}
+                    </li>
+                `).join('');
+
+                hilfeKapitelGeladen = true;
+            } catch (error) {
+                console.error('Fehler beim Laden der Kapitel:', error);
+            }
+        }
+
+        async function ladeKapitelInhalt(kapitelId) {
+            const inhaltDiv = document.getElementById('hilfe-inhalt');
+
+            // Aktives Kapitel markieren
+            document.querySelectorAll('.hilfe-kapitel-item').forEach(item => {
+                item.classList.remove('active');
+                if (item.dataset.kapitel === kapitelId) {
+                    item.classList.add('active');
+                }
+            });
+
+            // Ladeanimation
+            inhaltDiv.innerHTML = `
+                <div class="center-align" style="padding: 50px;">
+                    <div class="preloader-wrapper active">
+                        <div class="spinner-layer spinner-blue-only">
+                            <div class="circle-clipper left"><div class="circle"></div></div>
+                            <div class="circle-clipper right"><div class="circle"></div></div>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            try {
+                const response = await fetch(`/api/hilfe/kapitel/${kapitelId}`);
+                const data = await response.json();
+
+                if (data.error) {
+                    inhaltDiv.innerHTML = `<p class="red-text">${data.error}</p>`;
+                    return;
+                }
+
+                inhaltDiv.innerHTML = `
+                    <div class="hilfe-content">
+                        ${data.html}
+                    </div>
+                `;
+                aktuellesKapitel = kapitelId;
+            } catch (error) {
+                inhaltDiv.innerHTML = `<p class="red-text">Fehler beim Laden: ${error.message}</p>`;
+            }
+        }
+
+        // Save settings
+        async function saveSettings() {
+            const data = {
+                name: document.getElementById('settings-name').value,
+                firma: document.getElementById('settings-firma').value,
+                bewirtender_name: document.getElementById('settings-bewirtender').value,
+                auto_kategorisieren: document.getElementById('settings-auto-kat').checked,
+                auto_matching: document.getElementById('settings-auto-match').checked
+            };
+
+            // Add signature if present
+            if (signatureBase64) {
+                data.unterschrift_base64 = signatureBase64;
+            }
+
+            await api('/api/einstellungen', {
+                method: 'PUT',
+                body: JSON.stringify(data)
+            });
+
+            M.toast({html: 'Einstellungen gespeichert'});
+            M.Modal.getInstance(document.getElementById('settings-modal')).close();
+        }
+
+        // Helpers
+        function formatDate(dateStr) {
+            if (!dateStr) return '-';
+            const d = new Date(dateStr);
+            return d.toLocaleDateString('de-DE');
+        }
+
+        // ============================================
+        // Fehlende Belege (Missing Receipts)
+        // ============================================
+        function showFehlendeBelege() {
+            const fehlende = transaktionen.filter(t => t.status !== 'zugeordnet' && t.status !== 'ignoriert');
+            const container = document.getElementById('fehlende-belege-liste');
+
+            if (!fehlende.length) {
+                container.innerHTML = `
+                    <tr>
+                        <td colspan="5" class="center-align grey-text" style="padding: 40px;">
+                            <i class="material-icons" style="font-size: 48px;">check_circle</i>
+                            <p>Alle Transaktionen haben Belege!</p>
+                        </td>
+                    </tr>`;
+                document.getElementById('fehlende-summe').textContent = '0,00 €';
+            } else {
+                let html = '';
+                let summe = 0;
+
+                fehlende.forEach(t => {
+                    const betrag = t.betrag_eur || t.betrag || 0;
+                    summe += betrag;
+                    const katName = kategorien[t.kategorie] || t.kategorie || '-';
+
+                    html += `
+                        <tr>
+                            <td>${formatDate(t.datum)}</td>
+                            <td>
+                                <strong>${t.haendler || ''}</strong><br>
+                                <small class="grey-text">${t.beschreibung || ''}</small>
+                            </td>
+                            <td><span class="chip kategorie">${katName}</span></td>
+                            <td class="right-align">${betrag.toFixed(2)} €</td>
+                            <td>
+                                <a class="btn-flat btn-small waves-effect" onclick="openTransaktion(${t.id}); M.Modal.getInstance(document.getElementById('fehlende-belege-modal')).close();" title="Bearbeiten">
+                                    <i class="material-icons">edit</i>
+                                </a>
+                            </td>
+                        </tr>`;
+                });
+
+                container.innerHTML = html;
+                document.getElementById('fehlende-summe').textContent = summe.toFixed(2).replace('.', ',') + ' €';
+            }
+
+            const modal = M.Modal.getInstance(document.getElementById('fehlende-belege-modal'));
+            modal.open();
+        }
+
+        function exportFehlendeBelege() {
+            const fehlende = transaktionen.filter(t => t.status !== 'zugeordnet' && t.status !== 'ignoriert');
+
+            if (!fehlende.length) {
+                M.toast({html: 'Keine fehlenden Belege zum Exportieren'});
+                return;
+            }
+
+            // Create CSV content
+            const headers = ['Datum', 'Händler', 'Beschreibung', 'Kategorie', 'Betrag EUR'];
+            const rows = fehlende.map(t => [
+                t.datum || '',
+                (t.haendler || '').replace(/"/g, '""'),
+                (t.beschreibung || '').replace(/"/g, '""'),
+                kategorien[t.kategorie] || t.kategorie || '',
+                (t.betrag_eur || t.betrag || 0).toFixed(2)
+            ]);
+
+            let csv = headers.join(';') + '\n';
+            rows.forEach(row => {
+                csv += row.map(cell => `"${cell}"`).join(';') + '\n';
+            });
+
+            // Add BOM for Excel UTF-8 compatibility
+            const bom = '\uFEFF';
+            const blob = new Blob([bom + csv], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `fehlende_belege_${new Date().toISOString().split('T')[0]}.csv`;
+            a.click();
+
+            URL.revokeObjectURL(url);
+            M.toast({html: `${fehlende.length} Einträge exportiert`});
+        }
+
+        // ============================================
+        // PDF Viewer
+        // ============================================
+        let pdfDoc = null;
+        let pdfPageNum = 1;
+        let pdfScale = 1.5;
+        let pdfCurrentUrl = null;
+        let pdfCurrentFilename = null;
+
+        // Initialize PDF.js worker
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+        async function openPdfViewer(belegId, filename) {
+            openPdfViewerUrl(`/api/belege/${belegId}/download`, filename);
+        }
+
+        async function openPdfViewerUrl(url, filename) {
+            pdfCurrentUrl = url;
+            pdfCurrentFilename = filename;
+            pdfPageNum = 1;
+            pdfScale = 1.5;
+
+            document.getElementById('pdf-filename').textContent = filename;
+            document.getElementById('pdf-loading').style.display = 'block';
+            document.getElementById('pdf-canvas').style.display = 'none';
+            document.getElementById('pdf-zoom-level').textContent = '100%';
+
+            const modal = M.Modal.getInstance(document.getElementById('pdf-modal'));
+            modal.open();
+
+            try {
+                const loadingTask = pdfjsLib.getDocument(pdfCurrentUrl);
+                pdfDoc = await loadingTask.promise;
+
+                document.getElementById('pdf-page-count').textContent = pdfDoc.numPages;
+                document.getElementById('pdf-loading').style.display = 'none';
+                document.getElementById('pdf-canvas').style.display = 'block';
+
+                renderPdfPage(pdfPageNum);
+            } catch (error) {
+                console.error('PDF load error:', error);
+                document.getElementById('pdf-loading').innerHTML =
+                    '<p style="color: #ff5252;">Fehler beim Laden des PDFs</p>';
+            }
+        }
+
+        async function renderPdfPage(num) {
+            if (!pdfDoc) return;
+
+            const page = await pdfDoc.getPage(num);
+            const viewport = page.getViewport({ scale: pdfScale });
+
+            const canvas = document.getElementById('pdf-canvas');
+            const context = canvas.getContext('2d');
+
+            canvas.height = viewport.height;
+            canvas.width = viewport.width;
+
+            const renderContext = {
+                canvasContext: context,
+                viewport: viewport
+            };
+
+            await page.render(renderContext).promise;
+
+            document.getElementById('pdf-page-num').textContent = num;
+            document.getElementById('pdf-prev').disabled = (num <= 1);
+            document.getElementById('pdf-next').disabled = (num >= pdfDoc.numPages);
+        }
+
+        function pdfPrevPage() {
+            if (pdfPageNum <= 1) return;
+            pdfPageNum--;
+            renderPdfPage(pdfPageNum);
+        }
+
+        function pdfNextPage() {
+            if (!pdfDoc || pdfPageNum >= pdfDoc.numPages) return;
+            pdfPageNum++;
+            renderPdfPage(pdfPageNum);
+        }
+
+        function pdfZoomIn() {
+            pdfScale = Math.min(pdfScale + 0.25, 3);
+            document.getElementById('pdf-zoom-level').textContent = Math.round(pdfScale / 1.5 * 100) + '%';
+            renderPdfPage(pdfPageNum);
+        }
+
+        function pdfZoomOut() {
+            pdfScale = Math.max(pdfScale - 0.25, 0.5);
+            document.getElementById('pdf-zoom-level').textContent = Math.round(pdfScale / 1.5 * 100) + '%';
+            renderPdfPage(pdfPageNum);
+        }
+
+        function pdfDownload() {
+            if (pdfCurrentUrl) {
+                const a = document.createElement('a');
+                a.href = pdfCurrentUrl;
+                a.download = pdfCurrentFilename || 'beleg.pdf';
+                a.click();
+            }
+        }
+
+        // ==================== Personen Management ====================
+
+        let personenList = [];
+        let editingPersonId = null;
+
+        async function openPersonenModal() {
+            await loadPersonenList();
+            M.Modal.getInstance(document.getElementById('personen-modal')).open();
+        }
+
+        async function loadPersonenList() {
+            personenList = await api('/api/personen');
+            renderPersonenList();
+        }
+
+        function renderPersonenList() {
+            const container = document.getElementById('personen-list');
+            const emptyState = document.getElementById('personen-empty');
+
+            if (personenList.length === 0) {
+                container.style.display = 'none';
+                emptyState.style.display = 'block';
+                return;
+            }
+
+            container.style.display = 'block';
+            emptyState.style.display = 'none';
+
+            container.innerHTML = personenList.map(p =>
+                `<li class="collection-item" id="person-item-${p.id}">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span>
+                            <strong>${p.name}</strong>
+                            ${p.firma ? '<span class="grey-text"> - ' + p.firma + '</span>' : ''}
+                        </span>
+                        <span>
+                            <a class="btn-flat btn-small" onclick="editPerson(${p.id})">
+                                <i class="material-icons grey-text">edit</i>
+                            </a>
+                            <a class="btn-flat btn-small" onclick="deletePerson(${p.id})">
+                                <i class="material-icons grey-text">delete</i>
+                            </a>
+                        </span>
+                    </div>
+                </li>`
+            ).join('');
+        }
+
+        async function savePersonFromModal() {
+            const nameInput = document.getElementById('person-name');
+            const firmaInput = document.getElementById('person-firma');
+
+            const name = nameInput.value.trim();
+            const firma = firmaInput.value.trim();
+
+            if (!name) {
+                M.toast({ html: 'Bitte Name eingeben' });
+                return;
+            }
+
+            if (editingPersonId) {
+                // Update existing
+                await api(`/api/personen/${editingPersonId}`, {
+                    method: 'PUT',
+                    body: JSON.stringify({ name, firma })
+                });
+                M.toast({ html: 'Person aktualisiert' });
+                editingPersonId = null;
+            } else {
+                // Create new
+                await api('/api/personen', {
+                    method: 'POST',
+                    body: JSON.stringify({ name, firma })
+                });
+                M.toast({ html: 'Person hinzugefügt' });
+            }
+
+            // Clear form
+            nameInput.value = '';
+            firmaInput.value = '';
+
+            // Reload list
+            await loadPersonenList();
+
+            // Also update Bewirtungsbeleg chips if that's loaded
+            if (typeof loadPersonen === 'function') {
+                loadPersonen();
+            }
+        }
+
+        function editPerson(id) {
+            const person = personenList.find(p => p.id === id);
+            if (!person) return;
+
+            editingPersonId = id;
+            document.getElementById('person-name').value = person.name;
+            document.getElementById('person-firma').value = person.firma || '';
+            M.updateTextFields();
+
+            // Scroll to top of modal
+            document.querySelector('#personen-modal .modal-content').scrollTop = 0;
+            document.getElementById('person-name').focus();
+
+            M.toast({ html: 'Person zum Bearbeiten geladen' });
+        }
+
+        async function deletePerson(id) {
+            if (!confirm('Person wirklich löschen?')) return;
+
+            await api(`/api/personen/${id}`, { method: 'DELETE' });
+            M.toast({ html: 'Person gelöscht' });
+
+            // Reload list
+            await loadPersonenList();
+
+            // Also update Bewirtungsbeleg chips
+            if (typeof loadPersonen === 'function') {
+                loadPersonen();
+            }
+        }
+
+        // ==================== Bewirtungsbeleg ====================
+
+        let bewirtungTransaktionId = null;
+        let bewirtungTeilnehmer = [];
+        let gespeichertePersonen = [];
+
+        async function loadPersonen() {
+            gespeichertePersonen = await api('/api/personen');
+            updateKontakteChips();
+        }
+
+        function updateKontakteChips() {
+            const container = document.getElementById('bew-kontakte-chips');
+            if (gespeichertePersonen.length === 0) {
+                container.innerHTML = '<em>Keine gespeichert</em>';
+                return;
+            }
+            container.innerHTML = gespeichertePersonen.map(p =>
+                `<span class="chip" style="cursor: pointer;" onclick="addPersonFromKontakt(${p.id})">${p.name}${p.firma ? ' (' + p.firma + ')' : ''}</span>`
+            ).join('');
+        }
+
+        function addPersonFromKontakt(personId) {
+            const person = gespeichertePersonen.find(p => p.id === personId);
+            if (person && !bewirtungTeilnehmer.find(t => t.name === person.name)) {
+                bewirtungTeilnehmer.push({ name: person.name, firma: person.firma || '' });
+                updateTeilnehmerList();
+            }
+        }
+
+        function addBewTeilnehmer() {
+            const nameInput = document.getElementById('bew-person-name');
+            const firmaInput = document.getElementById('bew-person-firma');
+
+            const name = nameInput.value.trim();
+            const firma = firmaInput.value.trim();
+
+            if (!name) {
+                M.toast({ html: 'Bitte Name eingeben' });
+                return;
+            }
+
+            if (!bewirtungTeilnehmer.find(t => t.name === name)) {
+                bewirtungTeilnehmer.push({ name, firma });
+                updateTeilnehmerList();
+
+                // Save new person if not exists
+                if (!gespeichertePersonen.find(p => p.name === name)) {
+                    api('/api/personen', {
+                        method: 'POST',
+                        body: JSON.stringify({ name, firma })
+                    }).then(() => loadPersonen());
+                }
+            }
+
+            nameInput.value = '';
+            firmaInput.value = '';
+            nameInput.focus();
+        }
+
+        function removeBewTeilnehmer(index) {
+            bewirtungTeilnehmer.splice(index, 1);
+            updateTeilnehmerList();
+        }
+
+        function updateTeilnehmerList() {
+            const container = document.getElementById('bew-teilnehmer-list');
+            if (bewirtungTeilnehmer.length === 0) {
+                container.innerHTML = '<p class="grey-text center-align" style="padding: 15px;">Noch keine Gäste hinzugefügt</p>';
+                return;
+            }
+            container.innerHTML = bewirtungTeilnehmer.map((t, i) =>
+                `<div class="collection-item" style="display: flex; justify-content: space-between; align-items: center;">
+                    <span><strong>${t.name}</strong>${t.firma ? ' - ' + t.firma : ''}</span>
+                    <a class="btn-flat btn-small" onclick="removeBewTeilnehmer(${i})"><i class="material-icons grey-text">close</i></a>
+                </div>`
+            ).join('');
+        }
+
+        async function openBewirtungsbeleg(transaktionId) {
+            bewirtungTransaktionId = transaktionId;
+            bewirtungTeilnehmer = [];
+
+            // Load saved persons
+            await loadPersonen();
+
+            // Get transaction data
+            const t = transaktionen.find(tr => tr.id === transaktionId);
+            if (!t) return;
+
+            // Format date
+            let datumFormatted = t.datum;
+            if (t.datum && t.datum.includes('-')) {
+                const [y, m, d] = t.datum.split('-');
+                datumFormatted = `${d}.${m}.${y}`;
+            }
+
+            // Format amount
+            const betrag = (t.betrag_eur || t.betrag || 0).toFixed(2).replace('.', ',') + ' €';
+
+            // Fill form
+            document.getElementById('bew-datum').value = datumFormatted;
+            document.getElementById('bew-betrag').value = betrag;
+            document.getElementById('bew-restaurant').value = t.haendler || t.beschreibung || '';
+            document.getElementById('bew-ort').value = '';
+            document.getElementById('bew-anlass').value = 'Geschäftliche Besprechung';
+
+            updateTeilnehmerList();
+
+            // Update labels
+            M.updateTextFields();
+
+            // Open modal
+            M.Modal.getInstance(document.getElementById('bewirtungsbeleg-modal')).open();
+        }
+
+        async function createBewirtungsbeleg() {
+            if (bewirtungTeilnehmer.length === 0) {
+                M.toast({ html: 'Bitte mindestens einen Gast hinzufügen' });
+                return;
+            }
+
+            const data = {
+                restaurant: document.getElementById('bew-restaurant').value,
+                ort: document.getElementById('bew-ort').value,
+                anlass: document.getElementById('bew-anlass').value,
+                teilnehmer: bewirtungTeilnehmer
+            };
+
+            try {
+                const response = await fetch(`/api/transaktionen/${bewirtungTransaktionId}/bewirtungsbeleg`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+
+                if (response.ok) {
+                    // Download PDF
+                    const blob = await response.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = response.headers.get('Content-Disposition')?.split('filename=')[1]?.replace(/"/g, '') || 'Bewirtungsbeleg.pdf';
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+
+                    M.toast({ html: 'Bewirtungsbeleg erstellt!' });
+                    M.Modal.getInstance(document.getElementById('bewirtungsbeleg-modal')).close();
+                } else {
+                    const err = await response.json();
+                    M.toast({ html: 'Fehler: ' + (err.error || 'Unbekannt') });
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                M.toast({ html: 'Fehler beim Erstellen' });
+            }
+        }
+
+        // Check if transaction is restaurant/bewirtung category
+        function isRestaurantTransaction(transaktion) {
+            const kat = (transaktion.kategorie || '').toLowerCase();
+            const desc = (transaktion.beschreibung || '').toLowerCase();
+            return kat.includes('restaurant') || kat.includes('bewirtung') ||
+                   desc.includes('restaurant') || desc.includes('gastst') ||
+                   desc.includes('cafe') || desc.includes('bistro');
+        }
+    </script>
+</body>
+</html>

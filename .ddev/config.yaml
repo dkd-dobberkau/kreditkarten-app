@@ -1,0 +1,11 @@
+name: kreditkarten
+type: php
+docroot: public
+php_version: "8.2"
+webserver_type: nginx-fpm
+database:
+  type: postgres
+  version: "16"
+nodejs_version: "22"
+corepack_enable: false
+disable_upload_dirs_warning: true
