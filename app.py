@@ -1162,6 +1162,21 @@ def get_belege():
     limit = request.args.get('limit', type=int, default=25)
     offset = request.args.get('offset', type=int, default=0)
 
+    # Sorting
+    sort_by = request.args.get('sort_by', 'datum')  # datum, haendler, betrag, konto, status
+    sort_order = request.args.get('sort_order', 'desc')  # asc, desc
+
+    # Map sort_by to actual column names
+    sort_columns = {
+        'datum': 'COALESCE(t.datum, b.created_at)',
+        'haendler': 'COALESCE(t.haendler, b.datei_name)',
+        'betrag': 'COALESCE(t.betrag, 0)',
+        'konto': 'COALESCE(k.name, "")',
+        'status': 'CASE WHEN b.transaktion_id IS NOT NULL THEN 1 ELSE 0 END'
+    }
+    order_column = sort_columns.get(sort_by, sort_columns['datum'])
+    order_dir = 'ASC' if sort_order.lower() == 'asc' else 'DESC'
+
     conn = get_db()
 
     # Build query with filters
@@ -1220,7 +1235,7 @@ def get_belege():
         LEFT JOIN abrechnungen a ON t.abrechnung_id = a.id
         LEFT JOIN konten k ON a.konto_id = k.id
         WHERE {where_clause}
-        ORDER BY COALESCE(t.datum, b.created_at) DESC
+        ORDER BY {order_column} {order_dir}
         LIMIT ? OFFSET ?
     '''
     params.extend([limit, offset])

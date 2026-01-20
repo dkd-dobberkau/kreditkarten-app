@@ -144,6 +144,10 @@
         .hilfe-content ul { margin-left: 20px; }
         .hilfe-content li { margin: 8px 0; }
 
+        /* Sortable table headers */
+        th.sortable:hover { background-color: #e3f2fd; }
+        th.sortable i { vertical-align: middle; margin-left: 4px; }
+
         .collapsible-header {
             display: flex;
             align-items: center;
@@ -372,11 +376,21 @@
                             <table class="striped highlight">
                                 <thead>
                                     <tr>
-                                        <th>Datum</th>
-                                        <th>Händler</th>
-                                        <th class="right-align">Betrag</th>
-                                        <th>Konto</th>
-                                        <th>Status</th>
+                                        <th class="sortable" data-sort="datum" onclick="sortBelege('datum')" style="cursor: pointer;">
+                                            Datum <i class="material-icons tiny" id="sort-icon-datum">unfold_more</i>
+                                        </th>
+                                        <th class="sortable" data-sort="haendler" onclick="sortBelege('haendler')" style="cursor: pointer;">
+                                            Händler <i class="material-icons tiny" id="sort-icon-haendler">unfold_more</i>
+                                        </th>
+                                        <th class="sortable right-align" data-sort="betrag" onclick="sortBelege('betrag')" style="cursor: pointer;">
+                                            Betrag <i class="material-icons tiny" id="sort-icon-betrag">unfold_more</i>
+                                        </th>
+                                        <th class="sortable" data-sort="konto" onclick="sortBelege('konto')" style="cursor: pointer;">
+                                            Konto <i class="material-icons tiny" id="sort-icon-konto">unfold_more</i>
+                                        </th>
+                                        <th class="sortable" data-sort="status" onclick="sortBelege('status')" style="cursor: pointer;">
+                                            Status <i class="material-icons tiny" id="sort-icon-status">unfold_more</i>
+                                        </th>
                                         <th class="center-align">Aktion</th>
                                     </tr>
                                 </thead>
@@ -1218,6 +1232,36 @@
 
         let belegeCurrentOffset = 0;
         const belegeLimit = 25;
+        let belegeSortBy = 'datum';
+        let belegeSortOrder = 'desc';
+
+        function sortBelege(column) {
+            // Toggle order if same column, otherwise default to desc
+            if (belegeSortBy === column) {
+                belegeSortOrder = belegeSortOrder === 'desc' ? 'asc' : 'desc';
+            } else {
+                belegeSortBy = column;
+                belegeSortOrder = 'desc';
+            }
+            // Reset to first page when sorting changes
+            loadBelege(0);
+        }
+
+        function updateSortIcons() {
+            // Reset all icons
+            ['datum', 'haendler', 'betrag', 'konto', 'status'].forEach(col => {
+                const icon = document.getElementById(`sort-icon-${col}`);
+                if (icon) {
+                    if (col === belegeSortBy) {
+                        icon.textContent = belegeSortOrder === 'desc' ? 'arrow_downward' : 'arrow_upward';
+                        icon.style.color = '#1976d2';
+                    } else {
+                        icon.textContent = 'unfold_more';
+                        icon.style.color = '#9e9e9e';
+                    }
+                }
+            });
+        }
 
         function toggleBelege() {
             const belege = document.getElementById('belege-section');
@@ -1271,6 +1315,7 @@
             const status = document.getElementById('belege-status').value;
 
             let url = `/api/belege?limit=${belegeLimit}&offset=${offset}`;
+            url += `&sort_by=${belegeSortBy}&sort_order=${belegeSortOrder}`;
             if (kontoId) url += `&konto_id=${kontoId}`;
             if (von) url += `&von=${von}`;
             if (bis) url += `&bis=${bis}`;
@@ -1279,6 +1324,7 @@
             try {
                 const data = await api(url);
                 renderBelegeTable(data);
+                updateSortIcons();
             } catch (error) {
                 console.error('Error loading belege:', error);
                 M.toast({html: 'Fehler beim Laden der Belege'});
