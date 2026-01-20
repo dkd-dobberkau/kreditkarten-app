@@ -123,6 +123,25 @@
         .modal { max-height: 90%; }
         .modal .modal-content { padding: 24px; }
 
+        /* Hilfe-Modal Styles */
+        #hilfe-modal .modal-content { padding: 0; height: calc(100% - 56px); }
+        #hilfe-modal .row { height: 100%; }
+        .hilfe-kapitel-item { padding: 12px 16px !important; color: #333 !important; }
+        .hilfe-kapitel-item.active { background-color: #1976d2 !important; color: #fff !important; font-weight: 500; }
+        .hilfe-kapitel-item.active .badge { background-color: #fff !important; color: #1976d2 !important; }
+        .hilfe-kapitel-item:hover:not(.active) { background-color: #e3f2fd; }
+        .hilfe-content h1 { font-size: 1.8rem; margin-top: 0; border-bottom: 2px solid #1976d2; padding-bottom: 10px; }
+        .hilfe-content h2 { font-size: 1.4rem; margin-top: 25px; color: #1976d2; }
+        .hilfe-content h3 { font-size: 1.2rem; margin-top: 20px; }
+        .hilfe-content table { width: 100%; margin: 15px 0; border-collapse: collapse; }
+        .hilfe-content th, .hilfe-content td { padding: 10px; border: 1px solid #ddd; text-align: left; }
+        .hilfe-content th { background: #f5f5f5; }
+        .hilfe-content code { background: #e8e8e8; padding: 2px 6px; border-radius: 3px; font-family: monospace; color: #333; }
+        .hilfe-content pre { background: #37474f; color: #eceff1; padding: 15px; border-radius: 4px; overflow-x: auto; border: 1px solid #546e7a; line-height: 1.5; }
+        .hilfe-content pre code { background: transparent; color: inherit; padding: 0; }
+        .hilfe-content ul { margin-left: 20px; }
+        .hilfe-content li { margin: 8px 0; }
+
         .collapsible-header {
             display: flex;
             align-items: center;
@@ -310,7 +329,7 @@
             <div class="col s12 m4">
                 <div class="card">
                     <div class="card-content">
-                        <span class="card-title">Belege</span>
+                        <span class="card-title">Belege <a href="#" onclick="showHelp('03-belege-zuordnen'); return false;" class="grey-text" style="font-size: 0.9rem;"><i class="material-icons tiny">help_outline</i></a></span>
 
                         <!-- Upload Zone -->
                         <div class="upload-zone" id="beleg-upload" onclick="document.getElementById('beleg-input').click()">
@@ -338,7 +357,7 @@
     <!-- Import Modal -->
     <div id="import-modal" class="modal">
         <div class="modal-content">
-            <h4>Abrechnung importieren</h4>
+            <h4>Abrechnung importieren <a href="#" onclick="showHelp('02-import'); return false;" class="grey-text" style="font-size: 1rem;"><i class="material-icons tiny">help_outline</i></a></h4>
             <div class="row">
                 <div class="input-field col s12 m6">
                     <select id="import-konto">
@@ -595,7 +614,7 @@
     <!-- Bewirtungsbeleg Modal -->
     <div id="bewirtungsbeleg-modal" class="modal modal-fixed-footer" style="max-width: 700px;">
         <div class="modal-content">
-            <h4>Bewirtungsbeleg erstellen</h4>
+            <h4>Bewirtungsbeleg erstellen <a href="#" onclick="showHelp('05-bewirtungsbelege'); return false;" class="grey-text" style="font-size: 1rem;"><i class="material-icons tiny">help_outline</i></a></h4>
             <p class="grey-text">gemäß § 4 Abs. 5 Nr. 2 EStG</p>
 
             <div class="row">
@@ -706,6 +725,41 @@
             </div>
         </div>
         <div class="modal-footer">
+            <a href="#!" class="modal-close waves-effect btn-flat">Schließen</a>
+        </div>
+    </div>
+
+    <!-- Hilfe Modal -->
+    <div id="hilfe-modal" class="modal modal-fixed-footer" style="width: 90%; max-width: 1100px; max-height: 90%;">
+        <div class="modal-content" style="padding: 0;">
+            <div class="row" style="margin: 0; height: 100%;">
+                <!-- Kapitel-Navigation -->
+                <div class="col s12 m4 l3" style="background: #f5f5f5; padding: 20px; height: 100%; overflow-y: auto;">
+                    <h5 style="margin-top: 0;"><i class="material-icons left">menu_book</i>Handbuch</h5>
+                    <ul id="hilfe-kapitel-list" class="collection" style="border: none; margin-top: 20px;">
+                        <!-- Kapitel werden hier eingefügt -->
+                    </ul>
+                </div>
+                <!-- Inhalt -->
+                <div class="col s12 m8 l9" style="padding: 24px; height: 100%; overflow-y: auto;">
+                    <div id="hilfe-inhalt">
+                        <div class="center-align" style="padding: 50px;">
+                            <div class="preloader-wrapper active">
+                                <div class="spinner-layer spinner-blue-only">
+                                    <div class="circle-clipper left"><div class="circle"></div></div>
+                                    <div class="circle-clipper right"><div class="circle"></div></div>
+                                </div>
+                            </div>
+                            <p class="grey-text">Lade Handbuch...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <a href="/api/hilfe/pdf" class="btn waves-effect waves-light" style="margin-right: 10px;">
+                <i class="material-icons left">picture_as_pdf</i>Als PDF
+            </a>
             <a href="#!" class="modal-close waves-effect btn-flat">Schließen</a>
         </div>
     </div>
@@ -1505,7 +1559,7 @@
 
         function resetImportModal() {
             document.querySelector('#import-modal .modal-content').innerHTML = `
-                <h4>Abrechnung importieren</h4>
+                <h4>Abrechnung importieren <a href="#" onclick="showHelp('02-import'); return false;" class="grey-text" style="font-size: 1rem;"><i class="material-icons tiny">help_outline</i></a></h4>
                 <div class="row">
                     <div class="input-field col s12 m6">
                         <select id="import-konto">
@@ -1529,6 +1583,13 @@
             // Re-initialize
             loadKonten();
             setupDragDrop();
+
+            // Periodenvorschlag setzen
+            const periodeInput = document.getElementById('import-periode');
+            if (periodeInput) {
+                periodeInput.value = getDefaultPeriode();
+                M.updateTextFields();
+            }
 
             const importBtn = document.querySelector('#import-modal .modal-footer .btn');
             importBtn.innerHTML = 'Importieren';
@@ -1623,7 +1684,19 @@
         }
 
         // Modal openers
+        function getDefaultPeriode() {
+            const monate = ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni',
+                           'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'];
+            const heute = new Date();
+            return `${monate[heute.getMonth()]} ${heute.getFullYear()}`;
+        }
+
         function openImportModal() {
+            const periodeInput = document.getElementById('import-periode');
+            if (periodeInput && !periodeInput.value) {
+                periodeInput.value = getDefaultPeriode();
+                M.updateTextFields();
+            }
             M.Modal.getInstance(document.getElementById('import-modal')).open();
         }
 
@@ -1686,8 +1759,83 @@
             M.Modal.getInstance(document.getElementById('settings-modal')).open();
         }
 
-        function showHelp() {
-            M.toast({html: 'Hilfe: Importieren Sie Ihre Kreditkartenabrechnung als CSV und ordnen Sie Belege zu.'});
+        let hilfeKapitelGeladen = false;
+        let aktuellesKapitel = null;
+
+        async function showHelp(kapitelId = null) {
+            const modal = M.Modal.getInstance(document.getElementById('hilfe-modal'));
+            modal.open();
+
+            // Kapitel laden falls noch nicht geschehen
+            if (!hilfeKapitelGeladen) {
+                await ladeHilfeKapitel();
+            }
+
+            // Erstes Kapitel oder gewünschtes Kapitel anzeigen
+            const zielKapitel = kapitelId || '01-erste-schritte';
+            await ladeKapitelInhalt(zielKapitel);
+        }
+
+        async function ladeHilfeKapitel() {
+            try {
+                const response = await fetch('/api/hilfe/kapitel');
+                const kapitel = await response.json();
+
+                const liste = document.getElementById('hilfe-kapitel-list');
+                liste.innerHTML = kapitel.map((k, i) => `
+                    <li class="collection-item hilfe-kapitel-item" data-kapitel="${k.id}" onclick="ladeKapitelInhalt('${k.id}')" style="cursor: pointer;">
+                        <span class="badge">${i + 1}</span>
+                        ${k.titel}
+                    </li>
+                `).join('');
+
+                hilfeKapitelGeladen = true;
+            } catch (error) {
+                console.error('Fehler beim Laden der Kapitel:', error);
+            }
+        }
+
+        async function ladeKapitelInhalt(kapitelId) {
+            const inhaltDiv = document.getElementById('hilfe-inhalt');
+
+            // Aktives Kapitel markieren
+            document.querySelectorAll('.hilfe-kapitel-item').forEach(item => {
+                item.classList.remove('active');
+                if (item.dataset.kapitel === kapitelId) {
+                    item.classList.add('active');
+                }
+            });
+
+            // Ladeanimation
+            inhaltDiv.innerHTML = `
+                <div class="center-align" style="padding: 50px;">
+                    <div class="preloader-wrapper active">
+                        <div class="spinner-layer spinner-blue-only">
+                            <div class="circle-clipper left"><div class="circle"></div></div>
+                            <div class="circle-clipper right"><div class="circle"></div></div>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            try {
+                const response = await fetch(`/api/hilfe/kapitel/${kapitelId}`);
+                const data = await response.json();
+
+                if (data.error) {
+                    inhaltDiv.innerHTML = `<p class="red-text">${data.error}</p>`;
+                    return;
+                }
+
+                inhaltDiv.innerHTML = `
+                    <div class="hilfe-content">
+                        ${data.html}
+                    </div>
+                `;
+                aktuellesKapitel = kapitelId;
+            } catch (error) {
+                inhaltDiv.innerHTML = `<p class="red-text">Fehler beim Laden: ${error.message}</p>`;
+            }
         }
 
         // Save settings

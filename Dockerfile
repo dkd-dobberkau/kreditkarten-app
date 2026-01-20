@@ -42,6 +42,7 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 COPY --chown=appuser:appuser app.py matching.py ./
 COPY --chown=appuser:appuser parsers/ ./parsers/
 COPY --chown=appuser:appuser templates/ ./templates/
+COPY --chown=appuser:appuser docs/handbuch/ ./docs/handbuch/
 
 # Gunicorn Config kopieren
 COPY --chown=appuser:appuser gunicorn.conf.py ./

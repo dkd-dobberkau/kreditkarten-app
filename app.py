@@ -14,6 +14,8 @@ import json
 import os
 import re
 import io
+import markdown
+import glob as glob_module
 
 load_dotenv()
 
@@ -2238,6 +2240,139 @@ def get_bewirtungsbeleg(id):
     result = dict(beleg)
     result['teilnehmer'] = [dict(t) for t in teilnehmer]
     return jsonify(result)
+
+
+# =============================================================================
+# Handbuch / Hilfe
+# =============================================================================
+
+HANDBUCH_DIR = os.path.join(os.path.dirname(__file__), 'docs', 'handbuch')
+
+HANDBUCH_KAPITEL = [
+    {'id': '01-erste-schritte', 'titel': 'Erste Schritte', 'datei': '01-erste-schritte.md'},
+    {'id': '02-import', 'titel': 'Abrechnungen importieren', 'datei': '02-import.md'},
+    {'id': '03-belege-zuordnen', 'titel': 'Belege zuordnen', 'datei': '03-belege-zuordnen.md'},
+    {'id': '04-kategorisierung', 'titel': 'Kategorisierung', 'datei': '04-kategorisierung.md'},
+    {'id': '05-bewirtungsbelege', 'titel': 'Bewirtungsbelege', 'datei': '05-bewirtungsbelege.md'},
+    {'id': '06-export-archivierung', 'titel': 'Export & Archivierung', 'datei': '06-export-archivierung.md'},
+    {'id': '07-konten-verwalten', 'titel': 'Konten verwalten', 'datei': '07-konten-verwalten.md'},
+]
+
+
+@app.route('/api/hilfe/kapitel')
+def get_handbuch_kapitel():
+    """Gibt die Liste aller Handbuch-Kapitel zurück."""
+    return jsonify(HANDBUCH_KAPITEL)
+
+
+@app.route('/api/hilfe/kapitel/<kapitel_id>')
+def get_handbuch_inhalt(kapitel_id):
+    """Gibt den HTML-Inhalt eines Kapitels zurück."""
+    kapitel = next((k for k in HANDBUCH_KAPITEL if k['id'] == kapitel_id), None)
+    if not kapitel:
+        return jsonify({'error': 'Kapitel nicht gefunden'}), 404
+
+    datei_pfad = os.path.join(HANDBUCH_DIR, kapitel['datei'])
+    if not os.path.exists(datei_pfad):
+        return jsonify({'error': 'Datei nicht gefunden'}), 404
+
+    with open(datei_pfad, 'r', encoding='utf-8') as f:
+        md_content = f.read()
+
+    html_content = markdown.markdown(md_content, extensions=['tables', 'fenced_code'])
+    return jsonify({
+        'id': kapitel['id'],
+        'titel': kapitel['titel'],
+        'html': html_content
+    })
+
+
+@app.route('/api/hilfe/pdf')
+def get_handbuch_pdf():
+    """Generiert das komplette Handbuch als PDF."""
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import cm
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+    from io import BytesIO
+    import re
+
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4,
+                           leftMargin=2*cm, rightMargin=2*cm,
+                           topMargin=2*cm, bottomMargin=2*cm)
+
+    styles = getSampleStyleSheet()
+    styles.add(ParagraphStyle(name='Titel', fontSize=24, spaceAfter=30, fontName='Helvetica-Bold'))
+    styles.add(ParagraphStyle(name='Kapitel', fontSize=18, spaceBefore=20, spaceAfter=15, fontName='Helvetica-Bold'))
+    styles.add(ParagraphStyle(name='Unterkapitel', fontSize=14, spaceBefore=15, spaceAfter=10, fontName='Helvetica-Bold'))
+    styles.add(ParagraphStyle(name='Text', fontSize=11, spaceAfter=8, leading=14))
+    styles.add(ParagraphStyle(name='ListItem', fontSize=11, spaceAfter=4, leftIndent=20, leading=14))
+
+    story = []
+
+    # Titelseite
+    story.append(Spacer(1, 5*cm))
+    story.append(Paragraph('Kreditkarten-Abgleich App', styles['Titel']))
+    story.append(Paragraph('Benutzerhandbuch', styles['Kapitel']))
+    story.append(Spacer(1, 2*cm))
+    story.append(Paragraph(f'Stand: {datetime.now().strftime("%d.%m.%Y")}', styles['Text']))
+    story.append(PageBreak())
+
+    # Inhaltsverzeichnis
+    story.append(Paragraph('Inhaltsverzeichnis', styles['Kapitel']))
+    for i, kapitel in enumerate(HANDBUCH_KAPITEL, 1):
+        story.append(Paragraph(f'{i}. {kapitel["titel"]}', styles['Text']))
+    story.append(PageBreak())
+
+    # Kapitel
+    for kapitel in HANDBUCH_KAPITEL:
+        datei_pfad = os.path.join(HANDBUCH_DIR, kapitel['datei'])
+        if not os.path.exists(datei_pfad):
+            continue
+
+        with open(datei_pfad, 'r', encoding='utf-8') as f:
+            md_content = f.read()
+
+        # Einfaches Markdown-Parsing für PDF
+        lines = md_content.split('\n')
+        for line in lines:
+            line = line.strip()
+            if not line:
+                story.append(Spacer(1, 0.3*cm))
+            elif line.startswith('# '):
+                story.append(Paragraph(line[2:], styles['Kapitel']))
+            elif line.startswith('## '):
+                story.append(Paragraph(line[3:], styles['Unterkapitel']))
+            elif line.startswith('### '):
+                story.append(Paragraph(f'<b>{line[4:]}</b>', styles['Text']))
+            elif line.startswith('- '):
+                story.append(Paragraph(f'• {line[2:]}', styles['ListItem']))
+            elif line.startswith('|'):
+                continue  # Tabellen überspringen für Einfachheit
+            elif line.startswith('```'):
+                continue  # Code-Blöcke überspringen
+            else:
+                # Inline-Formatierung
+                line = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', line)
+                line = re.sub(r'\*(.+?)\*', r'<i>\1</i>', line)
+                if line:
+                    story.append(Paragraph(line, styles['Text']))
+
+        story.append(PageBreak())
+
+    doc.build(story)
+    buffer.seek(0)
+
+    return send_file(
+        buffer,
+        mimetype='application/pdf',
+        as_attachment=True,
+        download_name='Kreditkarten-App_Benutzerhandbuch.pdf'
+    )
 
 
 # =============================================================================
