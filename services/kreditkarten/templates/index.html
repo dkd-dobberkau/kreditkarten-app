@@ -1849,7 +1849,8 @@
             container.innerHTML = '<div class="center-align grey-text" style="padding: 20px;"><div class="preloader-wrapper small active"><div class="spinner-layer spinner-blue-only"><div class="circle-clipper left"><div class="circle"></div></div></div></div></div>';
 
             // Get unassigned receipts
-            const belege = await api('/api/belege?unzugeordnet=true');
+            const response = await api('/api/belege?unzugeordnet=true');
+            const belege = response.belege || [];
 
             if (!belege.length) {
                 container.innerHTML = '<p class="grey-text center">Keine unzugeordneten Belege verfügbar</p>';
@@ -2008,7 +2009,8 @@
         let allUnassignedBelege = [];
         async function loadManualBelegSelect() {
             const select = document.getElementById('manual-beleg-select');
-            allUnassignedBelege = await api('/api/belege?unzugeordnet=true');
+            const response = await api('/api/belege?unzugeordnet=true');
+            allUnassignedBelege = response.belege || [];
 
             let options = '<option value="">Beleg auswählen...</option>';
             allUnassignedBelege.forEach(b => {

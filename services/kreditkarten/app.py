@@ -217,6 +217,25 @@ def get_db():
     return conn
 
 
+def db_execute_with_retry(conn, sql, params=None, max_retries=3, retry_delay=0.5):
+    """Execute SQL with retry logic for database locked errors."""
+    import time
+    last_error = None
+    for attempt in range(max_retries):
+        try:
+            if params:
+                return conn.execute(sql, params)
+            return conn.execute(sql)
+        except sqlite3.OperationalError as e:
+            if 'database is locked' in str(e):
+                last_error = e
+                if attempt < max_retries - 1:
+                    time.sleep(retry_delay * (attempt + 1))
+                    continue
+            raise
+    raise last_error
+
+
 def init_db():
     """Initialize database with schema."""
     conn = get_db()
@@ -1287,6 +1306,43 @@ def download_beleg(id):
     return send_file(filepath, as_attachment=False)
 
 
+@app.route('/api/belege/<int:id>', methods=['GET'])
+def get_beleg(id):
+    """Get a single receipt by ID."""
+    conn = get_db()
+    beleg = conn.execute('SELECT * FROM belege WHERE id = ?', (id,)).fetchone()
+    conn.close()
+
+    if not beleg:
+        return jsonify({'error': 'Beleg nicht gefunden'}), 404
+
+    # Parse extracted data
+    try:
+        extracted = json.loads(beleg['extrahierte_daten'] or '{}')
+    except json.JSONDecodeError:
+        extracted = {}
+
+    return jsonify({
+        'id': beleg['id'],
+        'datei_name': beleg['datei_name'],
+        'datei_pfad': beleg['datei_pfad'],
+        'file_hash': beleg['file_hash'],
+        'transaktion_id': beleg['transaktion_id'],
+        'match_typ': beleg['match_typ'],
+        'match_confidence': beleg['match_confidence'],
+        'created_at': beleg['created_at'],
+        'extrahierte_daten': beleg['extrahierte_daten'],  # Keep as JSON string for frontend
+        'betrag': extracted.get('betrag'),
+        'datum': extracted.get('datum'),
+        'haendler': extracted.get('haendler'),
+        'waehrung': extracted.get('waehrung', 'EUR'),
+        'kategorie_vorschlag': extracted.get('kategorie_vorschlag'),
+        'rechnungsnummer': extracted.get('rechnungsnummer'),
+        'mwst': extracted.get('mwst'),
+        'ocr_text': extracted.get('ocr_text', '')
+    })
+
+
 @app.route('/api/belege/<int:id>', methods=['DELETE'])
 def delete_beleg(id):
     """Delete a receipt."""
@@ -1367,15 +1423,38 @@ def upload_beleg():
     # Extract data with AI
     extracted = extract_beleg_data(filepath)
 
-    # Save to database
-    cursor = conn.execute('''
-        INSERT INTO belege (datei_name, datei_pfad, file_hash, extrahierte_daten)
-        VALUES (?, ?, ?, ?)
-    ''', (filename, filepath, file_hash, json.dumps(extracted)))
-    beleg_id = cursor.lastrowid
+    # Save to database with error handling
+    beleg_id = None
+    error_response = None
+    try:
+        cursor = db_execute_with_retry(conn, '''
+            INSERT INTO belege (datei_name, datei_pfad, file_hash, extrahierte_daten)
+            VALUES (?, ?, ?, ?)
+        ''', (filename, filepath, file_hash, json.dumps(extracted)))
+        beleg_id = cursor.lastrowid
+        conn.commit()
+    except sqlite3.IntegrityError:
+        # Race condition: another request inserted the same hash
+        conn.close()
+        conn = get_db()
+        existing = conn.execute(
+            'SELECT id FROM belege WHERE file_hash = ?', (file_hash,)
+        ).fetchone()
+        # Clean up the saved file since we won't use it
+        if os.path.exists(filepath):
+            os.remove(filepath)
+        if existing:
+            error_response = (jsonify({'error': 'Dieser Beleg existiert bereits', 'id': existing['id']}), 409)
+        else:
+            error_response = (jsonify({'error': 'Beleg konnte nicht gespeichert werden (Duplikat)'}), 409)
+    except sqlite3.OperationalError as e:
+        app.logger.error(f"Database error during beleg upload: {e}")
+        error_response = (jsonify({'error': 'Datenbank vorübergehend nicht verfügbar, bitte erneut versuchen'}), 503)
+    finally:
+        conn.close()
 
-    conn.commit()
-    conn.close()
+    if error_response:
+        return error_response
 
     return jsonify({
         'success': True,
@@ -1699,16 +1778,21 @@ def auto_match_belege():
                             counter += 1
                     os.rename(old_filepath, new_filepath)
 
-            conn.execute('''
-                UPDATE belege
-                SET transaktion_id = ?, match_typ = 'auto', match_confidence = ?,
-                    datei_name = ?, datei_pfad = ?
-                WHERE id = ?
-            ''', (best_match['id'], best_score, new_filename, new_filepath, beleg['id']))
+            try:
+                db_execute_with_retry(conn, '''
+                    UPDATE belege
+                    SET transaktion_id = ?, match_typ = 'auto', match_confidence = ?,
+                        datei_name = ?, datei_pfad = ?
+                    WHERE id = ?
+                ''', (best_match['id'], best_score, new_filename, new_filepath, beleg['id']))
 
-            conn.execute('''
-                UPDATE transaktionen SET status = 'zugeordnet' WHERE id = ?
-            ''', (best_match['id'],))
+                db_execute_with_retry(conn, '''
+                    UPDATE transaktionen SET status = 'zugeordnet' WHERE id = ?
+                ''', (best_match['id'],))
+            except sqlite3.OperationalError as e:
+                app.logger.error(f"Database error during auto-match update: {e}")
+                # Skip this match but continue with others
+                continue
 
             matched_transaktion_ids.add(best_match['id'])
 
@@ -1723,8 +1807,13 @@ def auto_match_belege():
             # Remove matched transaction from pool
             transaktionen = [t for t in transaktionen if t['id'] != best_match['id']]
 
-    conn.commit()
-    conn.close()
+    try:
+        conn.commit()
+    except sqlite3.OperationalError as e:
+        app.logger.error(f"Database error during auto-match commit: {e}")
+        return jsonify({'error': 'Datenbank vorübergehend nicht verfügbar', 'partial_matches': matches_found}), 503
+    finally:
+        conn.close()
 
     return jsonify({
         'success': True,
