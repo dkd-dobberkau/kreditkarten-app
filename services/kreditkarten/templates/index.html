@@ -544,6 +544,22 @@
                         </div>
                     </div>
                 </div>
+
+                <!-- Unzugeordnete Belege (Inbox) -->
+                <div class="card" id="inbox-belege-card" style="display: none;">
+                    <div class="card-content">
+                        <span class="card-title">
+                            <i class="material-icons left">inbox</i>
+                            Belege Inbox
+                            <span class="badge new red" id="inbox-belege-count">0</span>
+                            <a class="btn-small waves-effect waves-light right" onclick="autoMatchAllBelege()" title="Alle automatisch zuordnen">
+                                <i class="material-icons left">auto_fix_high</i>Auto-Match
+                            </a>
+                        </span>
+                        <div id="inbox-belege-liste" style="margin-top: 16px;">
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <!-- Receipts -->
@@ -1003,6 +1019,7 @@
             loadKonten();
             loadKategorien();
             loadUnzugeordneteBelege();
+            loadAbrechnungBelege();  // Load inbox below transactions
             setupDragDrop();
         });
 
@@ -1039,12 +1056,23 @@
             importSelect.innerHTML = '<option value="">Konto wählen...</option>' + options;
             dashboardSelect.innerHTML = '<option value="">Alle Konten</option>' + options;
 
+            // Restore last selected Konto from localStorage
+            const savedKontoId = localStorage.getItem('kreditkarten_konto_id');
+            if (savedKontoId && konten.some(k => k.id == savedKontoId)) {
+                select.value = savedKontoId;
+            }
+
             M.FormSelect.init(select);
             M.FormSelect.init(importSelect);
             M.FormSelect.init(dashboardSelect);
 
             // Populate dashboard year select
             initDashboardYears();
+
+            // If Konto was restored, load Abrechnungen
+            if (select.value) {
+                loadAbrechnungen();
+            }
         }
 
         // =============================================================================
@@ -1440,6 +1468,9 @@
             const kontoId = document.getElementById('konto-select').value;
             if (!kontoId) return;
 
+            // Save selected Konto to localStorage
+            localStorage.setItem('kreditkarten_konto_id', kontoId);
+
             const abrechnungen = await api(`/api/abrechnungen?konto_id=${kontoId}`);
             const select = document.getElementById('abrechnung-select');
 
@@ -1448,7 +1479,19 @@
             ).join('');
 
             select.innerHTML = '<option value="">Abrechnung wählen...</option>' + options;
+
+            // Restore last selected Abrechnung from localStorage
+            const savedAbrechnungId = localStorage.getItem('kreditkarten_abrechnung_id');
+            if (savedAbrechnungId && abrechnungen.some(a => a.id == savedAbrechnungId)) {
+                select.value = savedAbrechnungId;
+            }
+
             M.FormSelect.init(select);
+
+            // If Abrechnung was restored, load it
+            if (select.value) {
+                loadAbrechnung();
+            }
         }
 
         // Load statement details
@@ -1459,8 +1502,12 @@
                 document.getElementById('stats-row').style.display = 'none';
                 document.getElementById('mini-stats-row').style.display = 'none';
                 document.getElementById('view-abrechnung-btn').style.display = 'none';
+                localStorage.removeItem('kreditkarten_abrechnung_id');
                 return;
             }
+
+            // Save selected Abrechnung to localStorage
+            localStorage.setItem('kreditkarten_abrechnung_id', abrechnungId);
 
             const data = await api(`/api/abrechnungen/${abrechnungId}`);
             currentAbrechnungData = data;
@@ -1609,6 +1656,7 @@
                 document.getElementById('upload-abrechnung-btn').style.display = 'none';
                 document.getElementById('export-list-btn').style.display = 'none';
                 document.getElementById('export-zip-btn').style.display = 'none';
+                document.getElementById('inbox-belege-card').style.display = 'none';
                 document.getElementById('transaktionen-liste').innerHTML = `
                     <div class="empty-state">
                         <i class="material-icons">receipt_long</i>
@@ -1662,6 +1710,67 @@
             transaktionen = await api(`/api/transaktionen?abrechnung_id=${abrechnungId}`);
             renderTransaktionen();
             updateMiniStats(transaktionen);
+            loadAbrechnungBelege();
+        }
+
+        // Load and render unassigned receipts (inbox)
+        async function loadAbrechnungBelege() {
+            const card = document.getElementById('inbox-belege-card');
+            const container = document.getElementById('inbox-belege-liste');
+            const countBadge = document.getElementById('inbox-belege-count');
+
+            // Fetch unassigned receipts
+            const response = await api('/api/belege?unzugeordnet=true');
+            const inboxBelege = response.belege || [];
+
+            if (!inboxBelege.length) {
+                card.style.display = 'none';
+                return;
+            }
+
+            card.style.display = 'block';
+            countBadge.textContent = inboxBelege.length;
+
+            // Sort by extracted date
+            inboxBelege.sort((a, b) => {
+                const dA = a.extracted_datum || a.display_datum || '';
+                const dB = b.extracted_datum || b.display_datum || '';
+                return dA.localeCompare(dB);
+            });
+
+            let html = '<table class="striped responsive-table" style="font-size: 0.9rem;">';
+            html += '<thead><tr><th>Datum</th><th>Händler</th><th style="text-align:right;">Betrag</th><th>Datei</th><th></th></tr></thead><tbody>';
+
+            for (const beleg of inboxBelege) {
+                const datum = beleg.display_datum || beleg.extracted_datum || '-';
+                const haendler = beleg.extracted_haendler || '-';
+                const betrag = beleg.extracted_betrag ? `${beleg.extracted_betrag.toFixed(2)} €` : '-';
+                const fileName = beleg.datei_name || 'Beleg';
+                const shortName = fileName.length > 30 ? fileName.substring(0, 27) + '...' : fileName;
+
+                html += `
+                    <tr>
+                        <td>${datum}</td>
+                        <td>${haendler}</td>
+                        <td style="text-align:right;">${betrag}</td>
+                        <td>
+                            <a href="#" onclick="viewBeleg(${beleg.id}); return false;" title="${fileName}" class="blue-text text-darken-2">
+                                <i class="material-icons tiny">picture_as_pdf</i> ${shortName}
+                            </a>
+                        </td>
+                        <td style="white-space: nowrap;">
+                            <a href="#" onclick="editBeleg(${beleg.id}); return false;" class="btn-flat btn-small" title="Bearbeiten">
+                                <i class="material-icons">edit</i>
+                            </a>
+                            <a href="#" onclick="showManualMatchModal(${beleg.id}); return false;" class="btn-flat btn-small" title="Manuell zuordnen">
+                                <i class="material-icons">link</i>
+                            </a>
+                        </td>
+                    </tr>`;
+            }
+
+            html += '</tbody></table>';
+            container.innerHTML = html;
         }
 
         // Render transactions grouped by category
@@ -2555,8 +2664,21 @@
         // Helpers
         function formatDate(dateStr) {
             if (!dateStr) return '-';
-            const d = new Date(dateStr);
-            return d.toLocaleDateString('de-DE');
+            // Handle German format (DD.MM.YYYY)
+            if (dateStr.includes('.')) {
+                const parts = dateStr.split('.');
+                if (parts.length === 3) {
+                    return dateStr; // Already in German format
+                }
+            }
+            // Handle ISO format (YYYY-MM-DD)
+            if (dateStr.includes('-')) {
+                const parts = dateStr.split('-');
+                if (parts.length === 3) {
+                    return `${parts[2]}.${parts[1]}.${parts[0]}`;
+                }
+            }
+            return dateStr;
         }
 
         // ============================================
