@@ -65,6 +65,32 @@ MONAT_KURZ = {
     'sep': 9, 'okt': 10, 'oct': 10, 'nov': 11, 'dez': 12, 'dec': 12
 }
 
+# Reverse mapping: month name -> number
+MONAT_NR = {name.lower(): nr for nr, name in MONAT_NAMEN.items()}
+
+
+def periode_to_date(periode):
+    """Convert period string like 'November 2025' to last day of month (YYYY-MM-DD)."""
+    if not periode:
+        return None
+    parts = periode.lower().split()
+    if len(parts) != 2:
+        return None
+    monat = MONAT_NR.get(parts[0])
+    try:
+        jahr = int(parts[1])
+    except ValueError:
+        return None
+    if not monat:
+        return None
+    # Last day of month
+    if monat == 12:
+        return f'{jahr}-12-31'
+    from datetime import date, timedelta
+    next_month = date(jahr, monat + 1, 1)
+    last_day = next_month - timedelta(days=1)
+    return last_day.isoformat()
+
 # Kategorien für Geschäftsausgaben
 KATEGORIEN = {
     'bewirtung': 'Restaurants, Cafés, Bars',
@@ -736,24 +762,40 @@ def get_abrechnungen():
     konto_id = request.args.get('konto_id')
     conn = get_db()
 
+    # Query with transaction counts for status calculation
+    base_query = '''
+        SELECT a.*, k.name as konto_name,
+            (SELECT COUNT(*) FROM transaktionen t WHERE t.abrechnung_id = a.id) as total_trans,
+            (SELECT COUNT(*) FROM transaktionen t WHERE t.abrechnung_id = a.id AND t.status IN ('zugeordnet', 'ignoriert')) as done_trans
+        FROM abrechnungen a
+        LEFT JOIN konten k ON a.konto_id = k.id
+    '''
+
     if konto_id:
-        abrechnungen = conn.execute('''
-            SELECT a.*, k.name as konto_name
-            FROM abrechnungen a
-            LEFT JOIN konten k ON a.konto_id = k.id
-            WHERE a.konto_id = ?
-            ORDER BY a.periode DESC
-        ''', (konto_id,)).fetchall()
+        abrechnungen = conn.execute(
+            base_query + ' WHERE a.konto_id = ? ORDER BY a.abrechnungsdatum DESC',
+            (konto_id,)
+        ).fetchall()
     else:
-        abrechnungen = conn.execute('''
-            SELECT a.*, k.name as konto_name
-            FROM abrechnungen a
-            LEFT JOIN konten k ON a.konto_id = k.id
-            ORDER BY a.periode DESC
-        ''').fetchall()
+        abrechnungen = conn.execute(
+            base_query + ' ORDER BY a.abrechnungsdatum DESC'
+        ).fetchall()
 
     conn.close()
-    return jsonify([dict(a) for a in abrechnungen])
+
+    # Calculate status dynamically
+    result = []
+    for a in abrechnungen:
+        row = dict(a)
+        total = row.pop('total_trans', 0)
+        done = row.pop('done_trans', 0)
+        if total > 0 and done == total:
+            row['status'] = 'abgeschlossen'
+        else:
+            row['status'] = 'offen'
+        result.append(row)
+
+    return jsonify(result)
 
 
 @app.route('/api/abrechnungen/<int:id>', methods=['GET'])
@@ -981,10 +1023,11 @@ def import_abrechnung():
     gutschriften = sum(1 for t in transaktionen if t.get('betrag', 0) < 0)
 
     # Create statement
+    abrechnungsdatum = periode_to_date(periode)
     cursor = conn.execute('''
-        INSERT INTO abrechnungen (konto_id, periode, gesamtbetrag, file_hash, datei_pfad, datei_name, status)
-        VALUES (?, ?, ?, ?, ?, ?, 'offen')
-    ''', (konto_id, periode, gesamtbetrag, file_hash, saved_filepath, original_filename))
+        INSERT INTO abrechnungen (konto_id, periode, abrechnungsdatum, gesamtbetrag, file_hash, datei_pfad, datei_name, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'offen')
+    ''', (konto_id, periode, abrechnungsdatum, gesamtbetrag, file_hash, saved_filepath, original_filename))
     abrechnung_id = cursor.lastrowid
 
     # Insert transactions with position number
