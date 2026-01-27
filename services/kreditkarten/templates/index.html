@@ -229,6 +229,7 @@
                 Kreditkarten-Abgleich
             </a>
             <ul id="nav-mobile" class="right">
+                <li><span id="current-date" class="nav-date" style="color: rgba(255,255,255,0.7); font-size: 0.9rem; padding: 0 15px;"></span></li>
                 <li><a href="#" onclick="toggleDashboard()" title="Dashboard"><i class="material-icons">dashboard</i></a></li>
                 <li><a href="#" onclick="toggleBelege()" title="Belege-Übersicht"><i class="material-icons">receipt_long</i></a></li>
                 <li><a href="#" onclick="openPersonenModal()" title="Personen verwalten"><i class="material-icons">people</i></a></li>
@@ -1013,9 +1014,18 @@
         let kategorien = {};
         let transaktionen = [];
 
+        // Display current date in navbar
+        function updateCurrentDate() {
+            const now = new Date();
+            const options = { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' };
+            const dateStr = now.toLocaleDateString('de-DE', options);
+            document.getElementById('current-date').textContent = dateStr;
+        }
+
         // Initialize
         document.addEventListener('DOMContentLoaded', function() {
             M.AutoInit();
+            updateCurrentDate();
             loadKonten();
             loadKategorien();
             loadUnzugeordneteBelege();
