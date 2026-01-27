@@ -4,7 +4,7 @@ CSV Parser für verschiedene Kreditkarten-Abrechnungen
 
 import csv
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from io import StringIO
 
 # Bank-spezifische Formate
@@ -258,3 +258,213 @@ def parse_csv(content, bank_format='generic'):
         })
 
     return transaktionen
+
+
+def validate_transaktionen(transaktionen, periode=None):
+    """
+    Validiert Transaktionen und erkennt systematische Datumsfehler.
+
+    Returns:
+        dict mit:
+        - valid: bool - ob die Daten gültig sind
+        - warnings: list - Warnungen
+        - corrections: dict - Vorgeschlagene Korrekturen
+        - transaktionen: list - korrigierte Transaktionen (wenn auto_correct)
+    """
+    if not transaktionen:
+        return {'valid': True, 'warnings': [], 'corrections': {}, 'transaktionen': []}
+
+    warnings = []
+    corrections = {}
+    heute = datetime.now().date()
+
+    # Sammle alle Transaktionsdaten
+    future_dates = []
+    date_years = {}
+
+    for idx, t in enumerate(transaktionen):
+        datum_str = t.get('datum')
+        if not datum_str:
+            continue
+
+        try:
+            datum = datetime.strptime(datum_str, '%Y-%m-%d').date()
+        except ValueError:
+            continue
+
+        # Prüfe auf Zukunftsdaten
+        if datum > heute:
+            future_dates.append({
+                'index': idx,
+                'datum': datum_str,
+                'beschreibung': t.get('beschreibung', '')[:50]
+            })
+
+        # Zähle Jahre
+        year = datum.year
+        if year not in date_years:
+            date_years[year] = []
+        date_years[year].append(idx)
+
+    # Parse Periode für Jahresvergleich
+    periode_year = None
+    if periode:
+        try:
+            parts = periode.split()
+            if len(parts) >= 2:
+                periode_year = int(parts[-1])
+        except (ValueError, IndexError):
+            pass
+
+    # Analysiere Jahresverteilung
+    sorted_years = sorted(date_years.keys())
+
+    for year in sorted_years:
+        count = len(date_years[year])
+        total = len(transaktionen)
+
+        # Prüfe auf systematischen Jahresfehler
+        is_year_error = False
+        expected_year = None
+
+        # Fall 1: Transaktionen in der Zukunft
+        if year > heute.year:
+            is_year_error = True
+            expected_year = year - 1
+
+        # Fall 2: Transaktionen ein Jahr nach der Periode
+        elif periode_year and year == periode_year + 1:
+            is_year_error = True
+            expected_year = periode_year
+
+        if is_year_error and expected_year:
+            if count == total:
+                # Alle Transaktionen im falschen Jahr
+                warnings.append({
+                    'type': 'year_error',
+                    'severity': 'error',
+                    'message': f'Alle {count} Transaktionen haben das Jahr {year}, erwartet wird {expected_year}',
+                    'auto_correctable': True
+                })
+                corrections['year_shift'] = {
+                    'from': year,
+                    'to': expected_year,
+                    'affected_count': count
+                }
+            elif count > total * 0.5:
+                # Mehr als 50% im falschen Jahr
+                warnings.append({
+                    'type': 'year_error',
+                    'severity': 'warning',
+                    'message': f'{count} von {total} Transaktionen haben das Jahr {year}, möglicherweise sollte es {expected_year} sein',
+                    'auto_correctable': True
+                })
+                corrections['year_shift'] = {
+                    'from': year,
+                    'to': expected_year,
+                    'affected_count': count
+                }
+
+    # Einzelne Zukunftsdaten (ohne systematischen Fehler)
+    if future_dates and 'year_shift' not in corrections:
+        if len(future_dates) <= 3:
+            for fd in future_dates:
+                warnings.append({
+                    'type': 'future_date',
+                    'severity': 'warning',
+                    'message': f'Transaktion "{fd["beschreibung"]}" hat Datum in der Zukunft: {fd["datum"]}',
+                    'auto_correctable': False
+                })
+        else:
+            warnings.append({
+                'type': 'future_dates',
+                'severity': 'warning',
+                'message': f'{len(future_dates)} Transaktionen haben Datum in der Zukunft',
+                'auto_correctable': False
+            })
+
+    # Prüfe Konsistenz mit Periode
+    if periode:
+        try:
+            # Parse Periode (z.B. "Dezember 2025")
+            monat_namen = {
+                'januar': 1, 'februar': 2, 'märz': 3, 'april': 4,
+                'mai': 5, 'juni': 6, 'juli': 7, 'august': 8,
+                'september': 9, 'oktober': 10, 'november': 11, 'dezember': 12
+            }
+            parts = periode.lower().split()
+            if len(parts) >= 2:
+                monat = monat_namen.get(parts[0])
+                jahr = int(parts[1])
+
+                if monat and jahr:
+                    periode_start = datetime(jahr, monat, 1).date()
+                    periode_end = datetime(jahr, monat + 1 if monat < 12 else 1, 1).date() - timedelta(days=1)
+                    if monat == 12:
+                        periode_end = datetime(jahr, 12, 31).date()
+
+                    outside_periode = 0
+                    for t in transaktionen:
+                        datum_str = t.get('datum')
+                        if datum_str:
+                            try:
+                                datum = datetime.strptime(datum_str, '%Y-%m-%d').date()
+                                # Erlaube 7 Tage Toleranz
+                                if datum < periode_start - timedelta(days=7) or datum > periode_end + timedelta(days=7):
+                                    outside_periode += 1
+                            except ValueError:
+                                pass
+
+                    if outside_periode > 0:
+                        warnings.append({
+                            'type': 'periode_mismatch',
+                            'severity': 'info',
+                            'message': f'{outside_periode} Transaktionen liegen außerhalb der Periode {periode}',
+                            'auto_correctable': False
+                        })
+        except (ValueError, IndexError):
+            pass
+
+    valid = not any(w.get('severity') == 'error' for w in warnings)
+
+    return {
+        'valid': valid,
+        'warnings': warnings,
+        'corrections': corrections,
+        'transaktionen': transaktionen
+    }
+
+
+def apply_corrections(transaktionen, corrections):
+    """
+    Wendet Korrekturen auf Transaktionen an.
+
+    Returns:
+        list: korrigierte Transaktionen
+    """
+    if not corrections:
+        return transaktionen
+
+    corrected = []
+
+    for t in transaktionen:
+        t_copy = t.copy()
+
+        # Jahreskorrektur
+        if 'year_shift' in corrections:
+            datum_str = t_copy.get('datum')
+            if datum_str:
+                from_year = str(corrections['year_shift']['from'])
+                to_year = str(corrections['year_shift']['to'])
+                if datum_str.startswith(from_year):
+                    t_copy['datum'] = to_year + datum_str[4:]
+
+            # Auch Buchungsdatum korrigieren
+            buchungsdatum_str = t_copy.get('buchungsdatum')
+            if buchungsdatum_str:
+                if buchungsdatum_str.startswith(from_year):
+                    t_copy['buchungsdatum'] = to_year + buchungsdatum_str[4:]
+
+        corrected.append(t_copy)
+
+    return corrected

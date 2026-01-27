@@ -936,7 +936,7 @@ def delete_abrechnung(id):
 @app.route('/api/abrechnungen/import', methods=['POST'])
 def import_abrechnung():
     """Import a credit card statement (CSV or PDF)."""
-    from parsers import parse_csv, detect_bank_format, parse_amex_pdf
+    from parsers import parse_csv, detect_bank_format, parse_amex_pdf, validate_transaktionen, apply_corrections
 
     if 'file' not in request.files:
         return jsonify({'error': 'Keine Datei hochgeladen'}), 400
@@ -1008,6 +1008,16 @@ def import_abrechnung():
         conn.close()
         return jsonify({'error': 'Keine Transaktionen gefunden'}), 400
 
+    # Validiere Transaktionen und korrigiere systematische Fehler
+    auto_correct = request.form.get('auto_correct', 'true').lower() == 'true'
+    validation = validate_transaktionen(transaktionen, periode)
+
+    if validation['corrections'] and auto_correct:
+        # Automatische Korrektur anwenden
+        transaktionen = apply_corrections(transaktionen, validation['corrections'])
+        # Re-validiere nach Korrektur
+        validation = validate_transaktionen(transaktionen, periode)
+
     # Auto-detect period if not provided
     if not periode and transaktionen:
         first_date = transaktionen[0].get('datum')
@@ -1050,13 +1060,21 @@ def import_abrechnung():
     conn.commit()
     conn.close()
 
-    return jsonify({
+    response = {
         'success': True,
         'id': abrechnung_id,
         'transaktionen': len(transaktionen),
         'gutschriften': gutschriften,
         'gesamtbetrag': gesamtbetrag
-    })
+    }
+
+    # Füge Validierungsinformationen hinzu
+    if validation.get('warnings'):
+        response['warnings'] = validation['warnings']
+    if validation.get('corrections'):
+        response['corrections_applied'] = validation['corrections']
+
+    return jsonify(response)
 
 
 # --- Transaktionen ---
