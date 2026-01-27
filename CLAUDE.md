@@ -8,94 +8,84 @@ Kreditkarten-Abgleich App - A web application for automatically reconciling cred
 
 **Language**: German (code, UI, comments)
 
+## Development Environment (DDEV)
+
+This project runs in DDEV with a custom Python/Flask service.
+
+```bash
+# Start development environment
+ddev start
+
+# Restart after code changes (auto-reload not enabled)
+ddev restart
+
+# View logs
+ddev logs -s kreditkarten
+
+# Execute commands in kreditkarten container
+ddev exec -s kreditkarten python /app/fix_script.py
+ddev exec -s kreditkarten "curl -s localhost:5000/health"
+
+# Run tests
+ddev exec -s kreditkarten pytest
+
+# Access the app
+open http://kreditkarten.ddev.site
+```
+
+### Container Structure
+- **kreditkarten**: Flask app on port 5000 (internal), served via Traefik
+- **health**: Health check aggregator on port 8080
+- **web**: DDEV nginx (not used for this app)
+- **db**: PostgreSQL 16 (not used - app uses SQLite)
+
+The Flask app code is in `services/kreditkarten/` and mounted at `/app` in the container.
+
 ## Tech Stack
 
 - **Backend**: Flask (Python 3.11) with Gunicorn
 - **Frontend**: Materialize CSS + Vanilla JS (no build tools)
-- **Database**: SQLite
+- **Database**: SQLite at `/app/data/kreditkarten.db`
 - **AI**: Claude API (Sonnet) for categorization and receipt extraction
 - **Export**: openpyxl (Excel), ReportLab (PDF)
-- **Container**: Docker with Traefik reverse proxy
 
-## Project Structure
+## Key Files
 
-```
-kreditkarten-app/
-├── app.py                 # Main Flask application
-├── cli.py                 # CLI for batch processing
-├── matching.py            # Receipt-transaction matching algorithms
-├── parsers/
-│   ├── csv_parser.py      # Bank-specific CSV parsers
-│   ├── pdf_parser.py      # PDF statement parser
-│   └── beleg_parser.py    # Receipt extraction
-├── templates/
-│   └── index.html         # Single-page web UI
-├── data/
-│   ├── kreditkarten.db    # SQLite database
-│   └── .cache.json        # Processing cache
-├── imports/inbox/         # New statements to process
-├── belege/inbox/          # New receipts to match
-├── exports/               # Generated reports (Year/Month structure)
-├── referenz-code/         # Reference implementation from Spesen-App
-└── docker-compose.yml     # Container orchestration with Traefik
-```
-
-## Development Commands
-
-```bash
-# Setup with uv
-uv sync
-
-# Run Flask development server
-uv run python app.py
-
-# Run with Docker
-docker compose up --build
-```
+| Path | Purpose |
+|------|---------|
+| `services/kreditkarten/app.py` | Main Flask application (~2500 lines) |
+| `services/kreditkarten/parsers/csv_parser.py` | Bank-specific CSV parsing with date validation |
+| `services/kreditkarten/parsers/beleg_parser.py` | Receipt OCR extraction via Claude API |
+| `services/kreditkarten/matching.py` | Receipt-to-transaction matching algorithm |
+| `services/kreditkarten/templates/index.html` | Single-page UI (Materialize + vanilla JS) |
+| `.ddev/docker-compose.kreditkarten.yaml` | DDEV service configuration |
 
 ## Environment Variables
 
-Required in `.env`:
+Required in `services/kreditkarten/.env`:
 - `ANTHROPIC_API_KEY` - Claude API key for AI features
-- `ENCRYPTION_KEY` - Fernet key for sensitive data (generate with: `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`)
-
-Optional:
-- `DATA_DIR` - Database and cache location (default: `./data`)
-- `EXPORTS_DIR` - Export output location (default: `./exports`)
-- `GUNICORN_WORKERS` - Number of Gunicorn workers
+- `ENCRYPTION_KEY` - Fernet key for sensitive data
 
 ## Architecture Notes
 
 ### Database Schema
-Five main tables: `konten` (accounts), `abrechnungen` (statements), `transaktionen` (transactions), `belege` (receipts), `kategorie_regeln` (categorization rules). See BRIEFING.md for full schema.
+Tables: `konten` (accounts), `abrechnungen` (statements), `transaktionen` (transactions), `belege` (receipts), `kategorie_regeln` (categorization rules), `bewirtungsbelege` (entertainment receipts), `personen` (guests). See `services/kreditkarten/BRIEFING.md` for full schema.
+
+### Statement Status Logic
+A statement (`abrechnung`) is automatically marked as `abgeschlossen` when all its transactions have status `zugeordnet` or `ignoriert`. Status is calculated dynamically on each API call, not stored.
+
+### CSV Import Validation
+The import validates transaction dates against the billing period and auto-corrects systematic year errors (e.g., all dates showing 2026 when period is December 2025).
 
 ### Matching Algorithm
 Receipt-to-transaction matching uses weighted scoring:
 - Exact amount match: +0.5 (within €0.01)
 - Date proximity: +0.3 (same day) to +0.1 (within 7 days)
 - Merchant name similarity: up to +0.2 (fuzzy matching)
-
-Threshold for auto-match: 0.5 confidence
+- Auto-match threshold: 0.5 confidence
 
 ### Bank CSV Formats
-Parsers support multiple bank formats with different encodings, delimiters, and column mappings. Currently defined: Amex (UTF-8, comma) and Visa DKB (ISO-8859-1, semicolon).
-
-### AI Integration
-Claude API is used for:
-1. Transaction categorization (merchant normalization, category suggestion with confidence score)
-2. Receipt data extraction (amount, date, merchant from OCR text)
-
-Both return structured JSON responses.
+Defined in `parsers/csv_parser.py` BANK_FORMATS dict. Supports: Amex (UTF-8, comma), Visa DKB (ISO-8859-1, semicolon), Mastercard Sparkasse.
 
 ### Export Structure
-Exports follow `exports/{Year}/{MM_MonthName}/` pattern with German month names.
-
-## Key Patterns from Reference Code
-
-The `referenz-code/` directory contains the complete Spesen-App implementation. Reusable patterns:
-- Flask app structure with health check endpoint
-- Fernet encryption for sensitive data (IBAN, card numbers)
-- Cache management with file hashes
-- Excel/PDF generation with consistent styling
-- File upload handling with type validation
-- EZB currency exchange rate fetching
+Exports follow `exports/{Year}/{MM_MonthName}/` pattern with German month names (Januar, Februar, etc.)
