@@ -1003,6 +1003,62 @@
         </div>
     </div>
 
+    <!-- Beleg bearbeiten Modal -->
+    <div id="edit-beleg-modal" class="modal modal-fixed-footer" style="max-width: 600px;">
+        <div class="modal-content">
+            <h4>Beleg bearbeiten</h4>
+            <input type="hidden" id="edit-beleg-id">
+            <div class="row">
+                <div class="input-field col s12">
+                    <input type="text" id="edit-beleg-haendler">
+                    <label for="edit-beleg-haendler" class="active">Händler</label>
+                </div>
+            </div>
+            <div class="row">
+                <div class="input-field col s6">
+                    <input type="text" id="edit-beleg-datum" placeholder="TT.MM.JJJJ">
+                    <label for="edit-beleg-datum" class="active">Datum</label>
+                </div>
+                <div class="input-field col s6">
+                    <input type="number" id="edit-beleg-betrag" step="0.01">
+                    <label for="edit-beleg-betrag" class="active">Betrag (€)</label>
+                </div>
+            </div>
+            <div class="row">
+                <div class="input-field col s6">
+                    <input type="number" id="edit-beleg-mwst" step="0.01">
+                    <label for="edit-beleg-mwst" class="active">MwSt (€)</label>
+                </div>
+                <div class="input-field col s6">
+                    <input type="text" id="edit-beleg-rechnungsnummer">
+                    <label for="edit-beleg-rechnungsnummer" class="active">Rechnungsnummer</label>
+                </div>
+            </div>
+            <div class="row">
+                <div class="input-field col s6">
+                    <select id="edit-beleg-kategorie">
+                        <option value="bewirtung">Bewirtung</option>
+                        <option value="reise_hotel">Reise/Hotel</option>
+                        <option value="buero">Büro</option>
+                        <option value="software">Software</option>
+                        <option value="sonstiges">Sonstiges</option>
+                    </select>
+                    <label>Kategorie</label>
+                </div>
+                <div class="input-field col s6">
+                    <input type="text" id="edit-beleg-zahlungsart">
+                    <label for="edit-beleg-zahlungsart" class="active">Zahlungsart</label>
+                </div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <a href="#!" class="modal-close waves-effect btn-flat">Abbrechen</a>
+            <a href="#!" class="waves-effect waves-light btn" onclick="saveBeleg()">
+                <i class="material-icons left">save</i>Speichern
+            </a>
+        </div>
+    </div>
+
     <!-- Materialize JS -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/js/materialize.min.js"></script>
     <!-- PDF.js -->
@@ -2235,6 +2291,89 @@
                 loadUnzugeordneteBelege();
             } catch (err) {
                 M.toast({html: 'Fehler beim Löschen: ' + err.message, classes: 'red'});
+            }
+        }
+
+        // View receipt PDF
+        function viewBeleg(belegId) {
+            openPdfViewer(belegId, '');
+        }
+
+        // Show manual match modal for inbox receipts
+        async function showManualMatchModal(belegId) {
+            // Load beleg data first
+            const beleg = await api(`/api/belege/${belegId}`);
+            if (!beleg || beleg.error) return;
+
+            // Set the beleg in the manual select and open transaction modal
+            currentTransaktionId = null;
+            document.getElementById('transaktion-modal').dataset.matchBelegId = belegId;
+
+            M.toast({html: 'Bitte eine Transaktion auswählen und den Beleg dort zuordnen'});
+        }
+
+        // Edit receipt metadata
+        async function editBeleg(belegId) {
+            const beleg = await api(`/api/belege/${belegId}`);
+            if (!beleg || beleg.error) {
+                M.toast({html: 'Beleg nicht gefunden', classes: 'red'});
+                return;
+            }
+
+            document.getElementById('edit-beleg-id').value = belegId;
+            document.getElementById('edit-beleg-haendler').value = beleg.haendler || '';
+            document.getElementById('edit-beleg-datum').value = beleg.datum || '';
+            document.getElementById('edit-beleg-betrag').value = beleg.betrag || '';
+            document.getElementById('edit-beleg-mwst').value = beleg.mwst || '';
+            document.getElementById('edit-beleg-rechnungsnummer').value = beleg.rechnungsnummer || '';
+            document.getElementById('edit-beleg-zahlungsart').value = beleg.zahlungsart || '';
+
+            // Set kategorie select
+            const katSelect = document.getElementById('edit-beleg-kategorie');
+            katSelect.value = beleg.kategorie_vorschlag || 'sonstiges';
+            M.FormSelect.init(katSelect);
+
+            // Update labels
+            M.updateTextFields();
+
+            const modal = M.Modal.getInstance(document.getElementById('edit-beleg-modal'));
+            modal.open();
+        }
+
+        // Save receipt metadata
+        async function saveBeleg() {
+            const belegId = document.getElementById('edit-beleg-id').value;
+            if (!belegId) return;
+
+            const betragVal = document.getElementById('edit-beleg-betrag').value;
+            const mwstVal = document.getElementById('edit-beleg-mwst').value;
+
+            const data = {
+                haendler: document.getElementById('edit-beleg-haendler').value || null,
+                datum: document.getElementById('edit-beleg-datum').value || null,
+                betrag: betragVal ? parseFloat(betragVal) : null,
+                mwst: mwstVal ? parseFloat(mwstVal) : null,
+                rechnungsnummer: document.getElementById('edit-beleg-rechnungsnummer').value || null,
+                zahlungsart: document.getElementById('edit-beleg-zahlungsart').value || null,
+                kategorie_vorschlag: document.getElementById('edit-beleg-kategorie').value
+            };
+
+            try {
+                await api(`/api/belege/${belegId}`, {
+                    method: 'PUT',
+                    body: JSON.stringify(data)
+                });
+                M.toast({html: 'Beleg gespeichert!'});
+                M.Modal.getInstance(document.getElementById('edit-beleg-modal')).close();
+
+                // Refresh inbox
+                const abrechnungId = document.getElementById('abrechnung-select').value;
+                if (abrechnungId) {
+                    loadAbrechnungBelege();
+                }
+                loadUnzugeordneteBelege();
+            } catch (e) {
+                M.toast({html: 'Fehler beim Speichern', classes: 'red'});
             }
         }
 

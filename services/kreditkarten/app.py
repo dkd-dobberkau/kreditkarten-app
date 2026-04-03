@@ -1442,6 +1442,38 @@ def delete_beleg(id):
     })
 
 
+@app.route('/api/belege/<int:id>', methods=['PUT'])
+def update_beleg(id):
+    """Update extracted data of a receipt."""
+    conn = get_db()
+    beleg = conn.execute('SELECT * FROM belege WHERE id = ?', (id,)).fetchone()
+
+    if not beleg:
+        conn.close()
+        return jsonify({'error': 'Beleg nicht gefunden'}), 404
+
+    data = request.json
+    try:
+        extracted = json.loads(beleg['extrahierte_daten'] or '{}')
+    except json.JSONDecodeError:
+        extracted = {}
+
+    # Aktualisierbare Felder
+    for field in ['haendler', 'datum', 'betrag', 'waehrung', 'mwst',
+                  'kategorie_vorschlag', 'rechnungsnummer', 'zahlungsart', 'adresse']:
+        if field in data:
+            extracted[field] = data[field]
+
+    conn.execute(
+        'UPDATE belege SET extrahierte_daten = ? WHERE id = ?',
+        (json.dumps(extracted, ensure_ascii=False), id)
+    )
+    conn.commit()
+    conn.close()
+
+    return jsonify({'success': True, 'extrahierte_daten': extracted})
+
+
 @app.route('/api/belege/upload', methods=['POST'])
 def upload_beleg():
     """Upload and process a receipt."""

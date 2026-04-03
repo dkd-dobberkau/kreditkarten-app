@@ -232,6 +232,19 @@ def extract_beleg_data(filepath):
 
                 if OCR_AVAILABLE:
                     ocr_text = pytesseract.image_to_string(images[0], lang='deu+eng')
+
+                # Fallback: Wenn Bild fast leer ist (z.B. Vektor-/HTML-PDF),
+                # direkten Text-Extraktor nutzen
+                if not ocr_text or len(ocr_text.strip()) < 10:
+                    try:
+                        from parsers.pdf_parser import extract_text_from_pdf
+                        text_pages = extract_text_from_pdf(safe_filepath)
+                        if text_pages:
+                            ocr_text = "\n".join(
+                                page for page in text_pages if page.strip()
+                            )
+                    except Exception:
+                        pass
     else:
         # Image file
         if OCR_AVAILABLE:
