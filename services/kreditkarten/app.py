@@ -91,6 +91,40 @@ def periode_to_date(periode):
     last_day = next_month - timedelta(days=1)
     return last_day.isoformat()
 
+
+def normalize_periode(periode_raw):
+    """Normalize various period formats to 'Monatsname Jahr' (e.g., 'April 2026').
+
+    Accepts:
+    - Already normalized: 'April 2026' -> unchanged
+    - Amex PDF range:    '24.03.26 bis 23.04.26' -> 'April 2026' (uses end month)
+    - Returns None if unparseable.
+    """
+    if not periode_raw:
+        return None
+    # Bereits "Monatsname Jahr"?
+    parts = periode_raw.strip().lower().split()
+    if len(parts) == 2 and parts[0] in MONAT_NR:
+        try:
+            int(parts[1])
+            return periode_raw.strip()
+        except ValueError:
+            pass
+    # Range "TT.MM.JJ[JJ] bis TT.MM.JJ[JJ]" -> Endmonat
+    import re
+    m = re.search(
+        r'(\d{1,2})\.(\d{1,2})\.(\d{2,4})\s*(?:bis|-|–)\s*(\d{1,2})\.(\d{1,2})\.(\d{2,4})',
+        periode_raw,
+    )
+    if m:
+        end_month = int(m.group(5))
+        end_year = int(m.group(6))
+        if end_year < 100:
+            end_year += 2000
+        if 1 <= end_month <= 12:
+            return f'{MONAT_NAMEN[end_month]} {end_year}'
+    return None
+
 # Kategorien für Geschäftsausgaben
 KATEGORIEN = {
     'bewirtung': 'Restaurants, Cafés, Bars',
@@ -1018,12 +1052,16 @@ def import_abrechnung():
         # Re-validiere nach Korrektur
         validation = validate_transaktionen(transaktionen, periode)
 
-    # Auto-detect period if not provided
-    if not periode and transaktionen:
-        first_date = transaktionen[0].get('datum')
-        if first_date:
+    # Normalize whatever the parser returned (PDF returns "TT.MM.JJ bis TT.MM.JJ", CSV none)
+    periode = normalize_periode(periode) or periode
+
+    # Auto-detect period if not provided or unparseable
+    if (not periode or not normalize_periode(periode)) and transaktionen:
+        # PDF-Periode konnte nicht normalisiert werden -> aus letztem Txn-Datum ableiten
+        last_date = max((t.get('datum') for t in transaktionen if t.get('datum')), default=None)
+        if last_date:
             try:
-                dt = datetime.strptime(first_date, '%Y-%m-%d')
+                dt = datetime.strptime(last_date, '%Y-%m-%d')
                 periode = f"{MONAT_NAMEN[dt.month]} {dt.year}"
             except ValueError:
                 periode = datetime.now().strftime('%B %Y')
