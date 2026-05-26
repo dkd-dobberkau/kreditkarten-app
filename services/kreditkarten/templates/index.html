@@ -1445,7 +1445,7 @@
                 const datum = b.display_datum ? formatDate(b.display_datum) : '-';
                 const haendler = b.display_haendler || '-';
                 const haendlerShort = haendler.length > 30 ? haendler.slice(0, 30) + '...' : haendler;
-                const betrag = b.display_betrag ? b.display_betrag.toLocaleString('de-DE', {style: 'currency', currency: 'EUR'}) : '-';
+                const betrag = b.display_betrag != null ? b.display_betrag.toLocaleString('de-DE', {style: 'currency', currency: b.display_waehrung || 'EUR'}) : '-';
                 const konto = b.konto_name || '-';
                 const statusIcon = b.status === 'zugeordnet'
                     ? '<i class="material-icons tiny green-text">check_circle</i> Zugeordnet'

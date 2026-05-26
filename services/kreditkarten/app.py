@@ -1333,12 +1333,14 @@ def get_belege():
                 beleg['extracted_betrag'] = extracted.get('betrag')
                 beleg['extracted_datum'] = extracted.get('datum')
                 beleg['extracted_haendler'] = extracted.get('haendler')
+                beleg['extracted_waehrung'] = extracted.get('waehrung')
             except json.JSONDecodeError:
                 pass
         # Determine display values (prefer transaktion data, fallback to extracted)
         beleg['display_datum'] = beleg.get('datum') or beleg.get('extracted_datum') or beleg.get('created_at', '')[:10]
         beleg['display_haendler'] = beleg.get('haendler') or beleg.get('extracted_haendler') or beleg.get('datei_name', '')
         beleg['display_betrag'] = beleg.get('betrag') or beleg.get('extracted_betrag')
+        beleg['display_waehrung'] = beleg.get('extracted_waehrung') or 'EUR'
         beleg['status'] = 'zugeordnet' if beleg.get('transaktion_id') else 'offen'
         belege.append(beleg)
 

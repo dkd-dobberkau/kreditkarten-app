@@ -112,7 +112,7 @@ def pdf_to_images(pdf_path):
         return []
 
 
-def extract_with_ai(image_path=None, ocr_text=None, image_base64=None, media_type=None):
+def extract_with_ai(image_path=None, ocr_text=None, image_base64=None, media_type=None, filename=None):
     """Extract receipt data using Claude AI."""
     if not AI_AVAILABLE:
         return None
@@ -120,20 +120,31 @@ def extract_with_ai(image_path=None, ocr_text=None, image_base64=None, media_typ
     try:
         client = get_anthropic_client()
 
-        prompt = """Extrahiere die folgenden Informationen aus diesem Beleg/Rechnung.
+        from datetime import datetime as _dt
+        current_year = _dt.now().year
+        filename_hint = filename or '(unbekannt)'
+
+        prompt = f"""Extrahiere die folgenden Informationen aus diesem Beleg/Rechnung.
 
 Antworte NUR mit JSON (keine Erklärungen):
-{
+{{
     "haendler": "Name des Geschäfts/Restaurants",
     "adresse": "Adresse falls vorhanden oder null",
     "datum": "TT.MM.JJJJ oder null",
     "betrag": 123.45,
-    "waehrung": "EUR",
+    "waehrung": "EUR/USD/GBP/...",
     "mwst": 12.34,
     "zahlungsart": "Kreditkarte/Bar/EC/null",
     "rechnungsnummer": "Falls vorhanden oder null",
     "kategorie_vorschlag": "bewirtung/reise_hotel/buero/software/sonstiges"
-}
+}}
+
+WICHTIG zum Datum:
+- Verwende NUR ein Jahr, das tatsächlich im Beleg oder im Dateinamen sichtbar ist. Erfinde NIE ein Jahr.
+- Sind nur Tag+Monat erkennbar (z.B. "20. Mai"): suche das Jahr im Dateinamen "{filename_hint}". Findest du dort ein Jahr, nimm dieses. Sonst nimm das aktuelle Jahr {current_year}.
+
+WICHTIG zur Währung:
+- "waehrung" muss die tatsächliche Rechnungswährung sein (z.B. USD bei "$56.00", EUR bei "€42,20"). Nicht pauschal EUR annehmen.
 
 Falls ein Wert nicht erkennbar ist, setze null."""
 
@@ -261,7 +272,8 @@ def extract_beleg_data(filepath):
             image_path=filepath if ext != '.pdf' else None,
             ocr_text=ocr_text,
             image_base64=image_base64,
-            media_type=pdf_media_type
+            media_type=pdf_media_type,
+            filename=os.path.basename(filepath)
         )
 
         if ai_result:
