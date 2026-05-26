@@ -182,19 +182,10 @@ Antworte NUR mit JSON:
             print(f"JSON Parse Error auf Seite {i+1}: {e}")
             continue
 
-    # Duplikate entfernen (basierend auf Datum + Beschreibung + Betrag)
-    seen = set()
-    unique_transactions = []
-    for t in all_transactions:
-        key = (t.get('umsatz_vom'), t.get('beschreibung'), t.get('betrag_eur'))
-        if key not in seen:
-            seen.add(key)
-            unique_transactions.append(t)
-
     return {
         'periode': periode,
         'gesamtbetrag': gesamtbetrag,
-        'transaktionen': unique_transactions
+        'transaktionen': all_transactions
     }
 
 
