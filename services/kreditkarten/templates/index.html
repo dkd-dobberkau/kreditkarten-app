@@ -1946,7 +1946,7 @@
                             <span class="transaction-amount">${(t.betrag_eur || t.betrag).toFixed(2)} €</span>
                             <span class="transaction-status">
                                 <i class="material-icons tiny ${statusClass}">${statusIcon}</i>
-                                ${t.beleg_datei ? '<i class="material-icons tiny">attachment</i>' : ''}
+                                ${t.beleg_datei ? (t.beleg_match_typ === 'eigenbeleg' ? '<i class="material-icons tiny" title="Eigenbeleg">description</i>' : '<i class="material-icons tiny" title="Beleg zugeordnet">attachment</i>') : ''}
                                 ${showBewirtung ? `<a class="btn-flat btn-small" onclick="event.stopPropagation(); openBewirtungsbeleg(${t.id})" title="Bewirtungsbeleg"><i class="material-icons tiny">receipt_long</i></a>` : ''}
                             </span>
                         </div>`;
