@@ -2486,9 +2486,9 @@ def _generate_eigenbeleg_pdf(transaktion: dict, begruendung_text: str, einstellu
 @app.route('/api/transaktionen/<int:id>/eigenbeleg', methods=['POST'])
 def create_eigenbeleg(id):
     """Generiert Eigenbeleg-PDF und ordnet ihn der Transaktion zu."""
-    import hashlib
-
     data = request.json or {}
+    # begruendung_typ wird vom Frontend gesendet, aktuell nicht persistiert
+    # (nur begruendung_text wird gespeichert)
     begruendung_text = (data.get('begruendung_text') or '').strip()
     if not begruendung_text:
         return jsonify({'error': 'Begründung darf nicht leer sein'}), 400
@@ -2533,27 +2533,37 @@ def create_eigenbeleg(id):
 
     file_hash = hashlib.sha256(pdf_bytes).hexdigest()
 
-    # DB: Insert oder Update
-    if bestehender_beleg:
-        conn.execute('''
-            UPDATE belege
-            SET datei_name = ?, datei_pfad = ?, file_hash = ?,
-                match_typ = ?, match_confidence = ?, begruendung = ?
-            WHERE id = ?
-        ''', (filename, filepath, file_hash, 'eigenbeleg', 1.0, begruendung_text,
-              bestehender_beleg['id']))
-        beleg_id = bestehender_beleg['id']
-    else:
-        cursor = conn.execute('''
-            INSERT INTO belege (transaktion_id, datei_name, datei_pfad, file_hash,
-                                match_typ, match_confidence, begruendung)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        ''', (id, filename, filepath, file_hash, 'eigenbeleg', 1.0, begruendung_text))
-        beleg_id = cursor.lastrowid
+    # DB: Insert oder Update — mit retry-Logik gegen "database is locked"
+    try:
+        if bestehender_beleg:
+            db_execute_with_retry(conn, '''
+                UPDATE belege
+                SET datei_name = ?, datei_pfad = ?, file_hash = ?,
+                    match_typ = ?, match_confidence = ?, begruendung = ?
+                WHERE id = ?
+            ''', (filename, filepath, file_hash, 'eigenbeleg', 1.0, begruendung_text,
+                  bestehender_beleg['id']))
+            beleg_id = bestehender_beleg['id']
+        else:
+            cursor = db_execute_with_retry(conn, '''
+                INSERT INTO belege (transaktion_id, datei_name, datei_pfad, file_hash,
+                                    match_typ, match_confidence, begruendung)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (id, filename, filepath, file_hash, 'eigenbeleg', 1.0, begruendung_text))
+            beleg_id = cursor.lastrowid
 
-    # Transaktion auf 'zugeordnet'
-    conn.execute("UPDATE transaktionen SET status = 'zugeordnet' WHERE id = ?", (id,))
-    conn.commit()
+        # Transaktion auf 'zugeordnet'
+        db_execute_with_retry(conn, "UPDATE transaktionen SET status = 'zugeordnet' WHERE id = ?", (id,))
+        conn.commit()
+    except Exception:
+        # Rollback DB + cleanup orphaned PDF
+        conn.rollback()
+        conn.close()
+        try:
+            os.remove(filepath)
+        except OSError:
+            pass
+        raise
     conn.close()
 
     return jsonify({

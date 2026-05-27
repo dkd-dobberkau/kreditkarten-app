@@ -1,5 +1,8 @@
 """Tests für Eigenbeleg-Feature."""
 
+import json
+import os
+
 
 class TestEigenbelegMigration:
     """Tests für die DB-Migration."""
@@ -51,10 +54,6 @@ class TestEigenbelegPdfGenerator:
         assert 'Beleg nicht erhalten' in text
         assert 'dkd Internet Service GmbH' in text
         assert 'Olivier Dobberkau' in text
-
-
-import json
-import os
 
 
 class TestEigenbelegEndpoint:
