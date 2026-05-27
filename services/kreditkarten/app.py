@@ -413,6 +413,17 @@ def init_db():
         -- Default-Einstellungen
         INSERT OR IGNORE INTO einstellungen (id, standard_kategorie) VALUES (1, 'sonstiges');
     ''')
+
+    # Additive Migrationen (idempotent: ALTER TABLE läuft nur wenn Spalte fehlt)
+    for migration in [
+        "ALTER TABLE belege ADD COLUMN begruendung TEXT",
+    ]:
+        try:
+            conn.execute(migration)
+        except sqlite3.OperationalError as e:
+            if 'duplicate column name' not in str(e).lower():
+                raise
+
     conn.commit()
     conn.close()
 
