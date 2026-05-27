@@ -1,9 +1,5 @@
 """Tests für Eigenbeleg-Feature."""
 
-import json
-import os
-import pytest
-
 
 class TestEigenbelegMigration:
     """Tests für die DB-Migration."""
