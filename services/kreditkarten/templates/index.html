@@ -714,6 +714,56 @@
                 <div id="manual-beleg-preview" style="display: none;" class="card-panel grey lighten-4">
                 </div>
             </div>
+
+            <!-- Eigenbeleg-Erstellung (sichtbar wenn kein Beleg verlinkt) -->
+            <div id="eigenbeleg-section" style="display: none; margin-top: 20px; border-top: 1px solid #ddd; padding-top: 16px;">
+                <h5>Kein Originalbeleg vorhanden?</h5>
+                <p class="grey-text">Erstellt einen Eigenbeleg gemäß § 158 AO als Ersatz für einen nicht beschaffbaren Originalbeleg.</p>
+
+                <div id="eigenbeleg-form" style="display: none; margin-top: 12px;">
+                    <p><strong>Begründung wählen:</strong></p>
+                    <p>
+                        <label>
+                            <input name="eigenbeleg-grund" type="radio" value="Beleg nicht erhalten" checked />
+                            <span>Beleg nicht erhalten</span>
+                        </label>
+                    </p>
+                    <p>
+                        <label>
+                            <input name="eigenbeleg-grund" type="radio" value="Beleg verloren" />
+                            <span>Beleg verloren</span>
+                        </label>
+                    </p>
+                    <p>
+                        <label>
+                            <input name="eigenbeleg-grund" type="radio" value="Kein Beleg ausgestellt" />
+                            <span>Kein Beleg ausgestellt</span>
+                        </label>
+                    </p>
+                    <p>
+                        <label>
+                            <input name="eigenbeleg-grund" type="radio" value="__sonstiges__" id="eigenbeleg-grund-sonstiges" />
+                            <span>Sonstiges</span>
+                        </label>
+                    </p>
+                    <div class="input-field" id="eigenbeleg-sonstiges-field" style="display: none;">
+                        <input type="text" id="eigenbeleg-sonstiges-text" />
+                        <label for="eigenbeleg-sonstiges-text">Begründung (freier Text)</label>
+                    </div>
+                    <div style="margin-top: 12px;">
+                        <a class="btn waves-effect waves-light" onclick="submitEigenbeleg()">
+                            <i class="material-icons left">description</i>Eigenbeleg erstellen
+                        </a>
+                        <a class="btn-flat waves-effect" onclick="cancelEigenbelegForm()">Abbrechen</a>
+                    </div>
+                </div>
+
+                <div id="eigenbeleg-trigger">
+                    <a class="btn waves-effect waves-light orange" onclick="showEigenbelegForm()">
+                        <i class="material-icons left">description</i>Eigenbeleg erstellen
+                    </a>
+                </div>
+            </div>
         </div>
         <div class="modal-footer">
             <a href="#!" class="modal-close waves-effect btn-flat">Schließen</a>
