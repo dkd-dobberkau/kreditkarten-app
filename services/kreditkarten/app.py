@@ -2342,6 +2342,147 @@ def get_kategorien():
     return jsonify(KATEGORIEN)
 
 
+def _generate_eigenbeleg_pdf(transaktion: dict, begruendung_text: str, einstellungen: dict) -> bytes:
+    """Erzeugt Eigenbeleg-PDF gemäß § 158 AO.
+
+    Args:
+        transaktion: Dict mit datum, haendler, beschreibung, betrag, waehrung, betrag_eur, kategorie.
+        begruendung_text: Begründung warum kein Originalbeleg vorliegt.
+        einstellungen: Dict mit name, firma, bewirtender_name, unterschrift_base64.
+
+    Returns:
+        PDF als Bytes.
+    """
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib.units import mm
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+    from io import BytesIO
+    from datetime import datetime as dt
+    import base64
+
+    try:
+        pdfmetrics.registerFont(TTFont('DejaVu', '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'))
+        pdfmetrics.registerFont(TTFont('DejaVu-Bold', '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'))
+        font = 'DejaVu'
+        font_bold = 'DejaVu-Bold'
+    except Exception:
+        font = 'Helvetica'
+        font_bold = 'Helvetica-Bold'
+
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4,
+                            leftMargin=20*mm, rightMargin=20*mm,
+                            topMargin=20*mm, bottomMargin=20*mm)
+
+    title_style = ParagraphStyle('Title', fontName=font_bold, fontSize=18, spaceAfter=5,
+                                 textColor=colors.HexColor('#333333'))
+    subtitle_style = ParagraphStyle('Subtitle', fontName=font, fontSize=10,
+                                    textColor=colors.grey, spaceAfter=15)
+    label_style = ParagraphStyle('Label', fontName=font_bold, fontSize=10,
+                                 textColor=colors.HexColor('#333333'))
+    normal_style = ParagraphStyle('Normal', fontName=font, fontSize=10, leading=14)
+    footer_style = ParagraphStyle('Footer', fontName=font, fontSize=8, textColor=colors.grey)
+
+    elements = []
+
+    elements.append(Paragraph("EIGENBELEG / ERSATZBELEG", title_style))
+    elements.append(Paragraph("gemäß § 158 AO", subtitle_style))
+    elements.append(Spacer(1, 5*mm))
+
+    # Aussteller
+    aussteller = einstellungen.get('firma') or einstellungen.get('name') or ''
+    aussteller_name = einstellungen.get('name') or einstellungen.get('bewirtender_name') or ''
+    elements.append(Paragraph("<b>Aussteller:</b>", label_style))
+    elements.append(Paragraph(f"{aussteller_name}<br/>{aussteller}", normal_style))
+    elements.append(Spacer(1, 8*mm))
+
+    # Datum formatieren
+    datum = transaktion.get('datum') or ''
+    try:
+        datum_formatted = dt.strptime(datum, '%Y-%m-%d').strftime('%d.%m.%Y')
+    except (ValueError, TypeError):
+        datum_formatted = datum
+
+    betrag = transaktion.get('betrag_eur') or transaktion.get('betrag') or 0
+    waehrung = transaktion.get('waehrung') or 'EUR'
+    betrag_str = f"{betrag:,.2f} {waehrung}".replace(',', 'X').replace('.', ',').replace('X', '.')
+
+    haendler = transaktion.get('haendler') or transaktion.get('beschreibung') or ''
+    beschreibung = transaktion.get('beschreibung') or ''
+    kategorie = transaktion.get('kategorie') or 'sonstiges'
+
+    # Hauptdaten-Tabelle
+    main_data = [
+        [Paragraph("<b>Datum der Ausgabe:</b>", label_style), Paragraph(datum_formatted, normal_style)],
+        [Paragraph("<b>Zahlungsempfänger:</b>", label_style), Paragraph(haendler, normal_style)],
+        [Paragraph("<b>Beschreibung:</b>", label_style), Paragraph(beschreibung, normal_style)],
+        [Paragraph("<b>Höhe der Ausgabe:</b>", label_style), Paragraph(betrag_str, normal_style)],
+        [Paragraph("<b>Kategorie:</b>", label_style), Paragraph(kategorie, normal_style)],
+    ]
+    main_table = Table(main_data, colWidths=[55*mm, 115*mm])
+    main_table.setStyle(TableStyle([
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('TOPPADDING', (0, 0), (-1, -1), 3),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+        ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#f5f5f5')),
+    ]))
+    elements.append(main_table)
+    elements.append(Spacer(1, 8*mm))
+
+    # Begründung
+    elements.append(Paragraph("<b>Begründung für Eigenbeleg:</b>", label_style))
+    elements.append(Spacer(1, 2*mm))
+    begr_table = Table([[Paragraph(begruendung_text, normal_style)]], colWidths=[170*mm])
+    begr_table.setStyle(TableStyle([
+        ('BOX', (0, 0), (-1, -1), 0.5, colors.grey),
+        ('TOPPADDING', (0, 0), (-1, -1), 4),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+        ('LEFTPADDING', (0, 0), (-1, -1), 4),
+        ('MINROWHEIGHT', (0, 0), (-1, -1), 15*mm),
+    ]))
+    elements.append(begr_table)
+    elements.append(Spacer(1, 10*mm))
+
+    # Erstellungsdatum
+    erstellt = dt.now().strftime('%d.%m.%Y')
+    elements.append(Paragraph(f"<b>Datum der Belegerstellung:</b> {erstellt}", normal_style))
+    elements.append(Spacer(1, 15*mm))
+
+    # Unterschrift
+    elements.append(Paragraph("<b>Unterschrift des Ausstellers:</b>", label_style))
+    elements.append(Spacer(1, 3*mm))
+    sig_b64 = einstellungen.get('unterschrift_base64')
+    if sig_b64:
+        try:
+            sig_data = base64.b64decode(sig_b64.split(',')[1] if ',' in sig_b64 else sig_b64)
+            sig_img = Image(BytesIO(sig_data), width=50*mm, height=15*mm)
+            elements.append(sig_img)
+        except Exception:
+            elements.append(Spacer(1, 15*mm))
+    else:
+        elements.append(Spacer(1, 15*mm))
+
+    sig_line = Table([['_' * 60]], colWidths=[170*mm])
+    elements.append(sig_line)
+    elements.append(Paragraph(f"Datum, Unterschrift: {aussteller_name}", normal_style))
+    elements.append(Spacer(1, 10*mm))
+
+    elements.append(Paragraph(
+        "<i>Hinweis: Dieser Eigenbeleg dient als Ersatz für einen nicht beschaffbaren Originalbeleg "
+        "gemäß § 158 AO.</i>",
+        footer_style
+    ))
+
+    doc.build(elements)
+    pdf_data = buffer.getvalue()
+    buffer.close()
+    return pdf_data
+
+
 # --- Bewirtungsbelege ---
 
 @app.route('/api/transaktionen/<int:id>/bewirtungsbeleg', methods=['POST'])
