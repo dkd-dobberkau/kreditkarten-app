@@ -2025,6 +2025,22 @@
             document.getElementById('detail-status-select').value = t.status || 'offen';
             document.getElementById('detail-notizen').value = t.notizen || '';
 
+            // Eigenbeleg-Sektion: nur sichtbar wenn Transaktion offen und kein Beleg verlinkt
+            const eigenbelegSection = document.getElementById('eigenbeleg-section');
+            const hatBeleg = t.beleg_id || t.beleg_datei;
+            if (t.status === 'offen' && !hatBeleg) {
+                eigenbelegSection.style.display = 'block';
+                document.getElementById('eigenbeleg-trigger').style.display = 'block';
+                document.getElementById('eigenbeleg-form').style.display = 'none';
+                document.getElementById('eigenbeleg-sonstiges-field').style.display = 'none';
+                document.getElementById('eigenbeleg-sonstiges-text').value = '';
+                // Default radio zurücksetzen
+                const defaultRadio = document.querySelector('input[name="eigenbeleg-grund"][value="Beleg nicht erhalten"]');
+                if (defaultRadio) defaultRadio.checked = true;
+            } else {
+                eigenbelegSection.style.display = 'none';
+            }
+
             M.FormSelect.init(document.querySelectorAll('#transaktion-modal select'));
             M.textareaAutoResize(document.getElementById('detail-notizen'));
             M.updateTextFields();
@@ -3358,6 +3374,83 @@
             return kat.includes('restaurant') || kat.includes('bewirtung') ||
                    desc.includes('restaurant') || desc.includes('gastst') ||
                    desc.includes('cafe') || desc.includes('bistro');
+        }
+
+        // Eigenbeleg: Formular zeigen
+        function showEigenbelegForm() {
+            document.getElementById('eigenbeleg-trigger').style.display = 'none';
+            document.getElementById('eigenbeleg-form').style.display = 'block';
+        }
+
+        // Eigenbeleg: Formular abbrechen
+        function cancelEigenbelegForm() {
+            document.getElementById('eigenbeleg-form').style.display = 'none';
+            document.getElementById('eigenbeleg-trigger').style.display = 'block';
+            document.getElementById('eigenbeleg-sonstiges-field').style.display = 'none';
+            document.getElementById('eigenbeleg-sonstiges-text').value = '';
+        }
+
+        // Eigenbeleg: Sonstiges-Toggle
+        document.addEventListener('change', function(e) {
+            if (e.target.name === 'eigenbeleg-grund') {
+                const sonstigesField = document.getElementById('eigenbeleg-sonstiges-field');
+                if (e.target.value === '__sonstiges__') {
+                    sonstigesField.style.display = 'block';
+                } else {
+                    sonstigesField.style.display = 'none';
+                }
+            }
+        });
+
+        // Eigenbeleg: Submit
+        async function submitEigenbeleg() {
+            if (!currentTransaktionId) return;
+            const selected = document.querySelector('input[name="eigenbeleg-grund"]:checked');
+            if (!selected) {
+                M.toast({html: 'Bitte Begründung auswählen', classes: 'red'});
+                return;
+            }
+            let begruendung_typ, begruendung_text;
+            if (selected.value === '__sonstiges__') {
+                begruendung_typ = 'sonstiges';
+                begruendung_text = document.getElementById('eigenbeleg-sonstiges-text').value.trim();
+                if (!begruendung_text) {
+                    M.toast({html: 'Bitte Begründungstext eingeben', classes: 'red'});
+                    return;
+                }
+            } else {
+                const typMap = {
+                    'Beleg nicht erhalten': 'beleg_nicht_erhalten',
+                    'Beleg verloren': 'beleg_verloren',
+                    'Kein Beleg ausgestellt': 'kein_beleg',
+                };
+                begruendung_typ = typMap[selected.value] || 'sonstiges';
+                begruendung_text = selected.value;
+            }
+
+            try {
+                const response = await fetch(`/api/transaktionen/${currentTransaktionId}/eigenbeleg`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ begruendung_typ, begruendung_text })
+                });
+                const data = await response.json();
+                if (!response.ok) {
+                    M.toast({html: data.error || 'Fehler beim Erstellen', classes: 'red'});
+                    return;
+                }
+                M.toast({html: 'Eigenbeleg erstellt', classes: 'green'});
+                M.Modal.getInstance(document.getElementById('transaktion-modal')).close();
+                // Liste neu laden
+                const abrechnungId = document.getElementById('abrechnung-select').value;
+                if (abrechnungId) {
+                    loadTransaktionen(abrechnungId);
+                    loadAbrechnungBelege();
+                }
+            } catch (err) {
+                M.toast({html: 'Netzwerkfehler', classes: 'red'});
+                console.error(err);
+            }
         }
     </script>
 </body>
