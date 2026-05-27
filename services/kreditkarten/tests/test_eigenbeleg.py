@@ -211,3 +211,22 @@ class TestTransaktionenApiEigenbelegFelder:
         t = next(x for x in data if x['id'] == sample_transaktion)
         assert t['beleg_match_typ'] == 'eigenbeleg'
         assert t['beleg_begruendung'] == 'Beleg verloren'
+
+    def test_transaktion_ohne_beleg_liefert_null_felder(self, client, sample_transaktion):
+        """Transaktion ohne Beleg liefert beleg_match_typ=None und beleg_begruendung=None.
+
+        Schützt gegen versehentliche Änderung des LEFT JOIN zu INNER JOIN.
+        """
+        import app as app_module
+        conn = app_module.get_db()
+        abrechnung_id = conn.execute(
+            'SELECT abrechnung_id FROM transaktionen WHERE id = ?', (sample_transaktion,)
+        ).fetchone()['abrechnung_id']
+        conn.close()
+
+        response = client.get(f'/api/transaktionen?abrechnung_id={abrechnung_id}')
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        t = next(x for x in data if x['id'] == sample_transaktion)
+        assert t['beleg_match_typ'] is None
+        assert t['beleg_begruendung'] is None
