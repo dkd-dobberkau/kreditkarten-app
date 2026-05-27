@@ -2027,16 +2027,9 @@
 
             // Eigenbeleg-Sektion: nur sichtbar wenn Transaktion offen und kein Beleg verlinkt
             const eigenbelegSection = document.getElementById('eigenbeleg-section');
-            const hatBeleg = t.beleg_id || t.beleg_datei;
-            if (t.status === 'offen' && !hatBeleg) {
+            if (t.status === 'offen' && !t.beleg_id) {
                 eigenbelegSection.style.display = 'block';
-                document.getElementById('eigenbeleg-trigger').style.display = 'block';
-                document.getElementById('eigenbeleg-form').style.display = 'none';
-                document.getElementById('eigenbeleg-sonstiges-field').style.display = 'none';
-                document.getElementById('eigenbeleg-sonstiges-text').value = '';
-                // Default radio zurücksetzen
-                const defaultRadio = document.querySelector('input[name="eigenbeleg-grund"][value="Beleg nicht erhalten"]');
-                if (defaultRadio) defaultRadio.checked = true;
+                resetEigenbelegForm();
             } else {
                 eigenbelegSection.style.display = 'none';
             }
@@ -3376,6 +3369,16 @@
                    desc.includes('cafe') || desc.includes('bistro');
         }
 
+        // Eigenbeleg: Formular-State auf Initialzustand setzen
+        function resetEigenbelegForm() {
+            document.getElementById('eigenbeleg-trigger').style.display = 'block';
+            document.getElementById('eigenbeleg-form').style.display = 'none';
+            document.getElementById('eigenbeleg-sonstiges-field').style.display = 'none';
+            document.getElementById('eigenbeleg-sonstiges-text').value = '';
+            const defaultRadio = document.querySelector('input[name="eigenbeleg-grund"][value="Beleg nicht erhalten"]');
+            if (defaultRadio) defaultRadio.checked = true;
+        }
+
         // Eigenbeleg: Formular zeigen
         function showEigenbelegForm() {
             document.getElementById('eigenbeleg-trigger').style.display = 'none';
@@ -3384,10 +3387,7 @@
 
         // Eigenbeleg: Formular abbrechen
         function cancelEigenbelegForm() {
-            document.getElementById('eigenbeleg-form').style.display = 'none';
-            document.getElementById('eigenbeleg-trigger').style.display = 'block';
-            document.getElementById('eigenbeleg-sonstiges-field').style.display = 'none';
-            document.getElementById('eigenbeleg-sonstiges-text').value = '';
+            resetEigenbelegForm();
         }
 
         // Eigenbeleg: Sonstiges-Toggle
@@ -3410,23 +3410,29 @@
                 M.toast({html: 'Bitte Begründung auswählen', classes: 'red'});
                 return;
             }
-            let begruendung_typ, begruendung_text;
+            const typMap = {
+                'Beleg nicht erhalten': 'beleg_nicht_erhalten',
+                'Beleg verloren': 'beleg_verloren',
+                'Kein Beleg ausgestellt': 'kein_beleg',
+                '__sonstiges__': 'sonstiges',
+            };
+            const begruendung_typ = typMap[selected.value];
+            let begruendung_text;
             if (selected.value === '__sonstiges__') {
-                begruendung_typ = 'sonstiges';
                 begruendung_text = document.getElementById('eigenbeleg-sonstiges-text').value.trim();
                 if (!begruendung_text) {
                     M.toast({html: 'Bitte Begründungstext eingeben', classes: 'red'});
                     return;
                 }
             } else {
-                const typMap = {
-                    'Beleg nicht erhalten': 'beleg_nicht_erhalten',
-                    'Beleg verloren': 'beleg_verloren',
-                    'Kein Beleg ausgestellt': 'kein_beleg',
-                };
-                begruendung_typ = typMap[selected.value] || 'sonstiges';
                 begruendung_text = selected.value;
             }
+
+            // Double-submit-Schutz: Buttons sperren während fetch
+            const submitBtn = document.querySelector('#eigenbeleg-form .btn');
+            const cancelBtn = document.querySelector('#eigenbeleg-form .btn-flat');
+            submitBtn.style.pointerEvents = 'none';
+            if (cancelBtn) cancelBtn.style.pointerEvents = 'none';
 
             try {
                 const response = await fetch(`/api/transaktionen/${currentTransaktionId}/eigenbeleg`, {
@@ -3450,6 +3456,9 @@
             } catch (err) {
                 M.toast({html: 'Netzwerkfehler', classes: 'red'});
                 console.error(err);
+            } finally {
+                submitBtn.style.pointerEvents = '';
+                if (cancelBtn) cancelBtn.style.pointerEvents = '';
             }
         }
     </script>
