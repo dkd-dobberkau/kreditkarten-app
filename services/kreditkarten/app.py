@@ -413,6 +413,17 @@ def init_db():
         -- Default-Einstellungen
         INSERT OR IGNORE INTO einstellungen (id, standard_kategorie) VALUES (1, 'sonstiges');
     ''')
+
+    # Additive Migrationen (idempotent: ALTER TABLE läuft nur wenn Spalte fehlt)
+    for migration in [
+        "ALTER TABLE belege ADD COLUMN begruendung TEXT",
+    ]:
+        try:
+            conn.execute(migration)
+        except sqlite3.OperationalError as e:
+            if 'duplicate column name' not in str(e).lower():
+                raise
+
     conn.commit()
     conn.close()
 
@@ -1125,7 +1136,8 @@ def get_transaktionen():
 
     if abrechnung_id:
         transaktionen = conn.execute('''
-            SELECT t.*, b.id as beleg_id, b.datei_name as beleg_datei
+            SELECT t.*, b.id as beleg_id, b.datei_name as beleg_datei,
+                   b.match_typ as beleg_match_typ, b.begruendung as beleg_begruendung
             FROM transaktionen t
             LEFT JOIN belege b ON t.id = b.transaktion_id
             WHERE t.abrechnung_id = ?
@@ -1133,7 +1145,8 @@ def get_transaktionen():
         ''', (abrechnung_id,)).fetchall()
     else:
         transaktionen = conn.execute('''
-            SELECT t.*, b.id as beleg_id, b.datei_name as beleg_datei
+            SELECT t.*, b.id as beleg_id, b.datei_name as beleg_datei,
+                   b.match_typ as beleg_match_typ, b.begruendung as beleg_begruendung
             FROM transaktionen t
             LEFT JOIN belege b ON t.id = b.transaktion_id
             ORDER BY t.position ASC
@@ -2329,6 +2342,237 @@ def archiviere_abrechnung(id):
 def get_kategorien():
     """Get all available categories."""
     return jsonify(KATEGORIEN)
+
+
+def _generate_eigenbeleg_pdf(transaktion: dict, begruendung_text: str, einstellungen: dict) -> bytes:
+    """Erzeugt Eigenbeleg-PDF gemäß § 158 AO.
+
+    Args:
+        transaktion: Dict mit datum, haendler, beschreibung, betrag, waehrung, betrag_eur, kategorie.
+        begruendung_text: Begründung warum kein Originalbeleg vorliegt.
+        einstellungen: Dict mit name, firma, bewirtender_name, unterschrift_base64.
+
+    Returns:
+        PDF als Bytes.
+    """
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib.units import mm
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+    from io import BytesIO
+    from datetime import datetime as dt
+    import base64
+
+    try:
+        pdfmetrics.registerFont(TTFont('DejaVu', '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'))
+        pdfmetrics.registerFont(TTFont('DejaVu-Bold', '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'))
+        font = 'DejaVu'
+        font_bold = 'DejaVu-Bold'
+    except Exception:
+        font = 'Helvetica'
+        font_bold = 'Helvetica-Bold'
+
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4,
+                            leftMargin=20*mm, rightMargin=20*mm,
+                            topMargin=20*mm, bottomMargin=20*mm)
+
+    title_style = ParagraphStyle('Title', fontName=font_bold, fontSize=18, spaceAfter=5,
+                                 textColor=colors.HexColor('#333333'))
+    subtitle_style = ParagraphStyle('Subtitle', fontName=font, fontSize=10,
+                                    textColor=colors.grey, spaceAfter=15)
+    label_style = ParagraphStyle('Label', fontName=font_bold, fontSize=10,
+                                 textColor=colors.HexColor('#333333'))
+    normal_style = ParagraphStyle('Normal', fontName=font, fontSize=10, leading=14)
+    footer_style = ParagraphStyle('Footer', fontName=font, fontSize=8, textColor=colors.grey)
+
+    elements = []
+
+    elements.append(Paragraph("EIGENBELEG / ERSATZBELEG", title_style))
+    elements.append(Paragraph("gemäß § 158 AO", subtitle_style))
+    elements.append(Spacer(1, 5*mm))
+
+    # Aussteller
+    aussteller = einstellungen.get('firma') or einstellungen.get('name') or ''
+    aussteller_name = einstellungen.get('name') or einstellungen.get('bewirtender_name') or ''
+    elements.append(Paragraph("<b>Aussteller:</b>", label_style))
+    elements.append(Paragraph(f"{aussteller_name}<br/>{aussteller}", normal_style))
+    elements.append(Spacer(1, 8*mm))
+
+    # Datum formatieren
+    datum = transaktion.get('datum') or ''
+    try:
+        datum_formatted = dt.strptime(datum, '%Y-%m-%d').strftime('%d.%m.%Y')
+    except (ValueError, TypeError):
+        datum_formatted = datum
+
+    betrag = transaktion.get('betrag_eur') or transaktion.get('betrag') or 0
+    waehrung = transaktion.get('waehrung') or 'EUR'
+    betrag_str = f"{betrag:,.2f} {waehrung}".replace(',', 'X').replace('.', ',').replace('X', '.')
+
+    haendler = transaktion.get('haendler') or transaktion.get('beschreibung') or ''
+    beschreibung = transaktion.get('beschreibung') or ''
+    kategorie = transaktion.get('kategorie') or 'sonstiges'
+
+    # Hauptdaten-Tabelle
+    main_data = [
+        [Paragraph("<b>Datum der Ausgabe:</b>", label_style), Paragraph(datum_formatted, normal_style)],
+        [Paragraph("<b>Zahlungsempfänger:</b>", label_style), Paragraph(haendler, normal_style)],
+        [Paragraph("<b>Beschreibung:</b>", label_style), Paragraph(beschreibung, normal_style)],
+        [Paragraph("<b>Höhe der Ausgabe:</b>", label_style), Paragraph(betrag_str, normal_style)],
+        [Paragraph("<b>Kategorie:</b>", label_style), Paragraph(kategorie, normal_style)],
+    ]
+    main_table = Table(main_data, colWidths=[55*mm, 115*mm])
+    main_table.setStyle(TableStyle([
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('TOPPADDING', (0, 0), (-1, -1), 3),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+        ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#f5f5f5')),
+    ]))
+    elements.append(main_table)
+    elements.append(Spacer(1, 8*mm))
+
+    # Begründung
+    elements.append(Paragraph("<b>Begründung für Eigenbeleg:</b>", label_style))
+    elements.append(Spacer(1, 2*mm))
+    begr_table = Table([[Paragraph(begruendung_text, normal_style)]], colWidths=[170*mm])
+    begr_table.setStyle(TableStyle([
+        ('BOX', (0, 0), (-1, -1), 0.5, colors.grey),
+        ('TOPPADDING', (0, 0), (-1, -1), 4),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+        ('LEFTPADDING', (0, 0), (-1, -1), 4),
+        ('MINROWHEIGHT', (0, 0), (-1, -1), 15*mm),
+    ]))
+    elements.append(begr_table)
+    elements.append(Spacer(1, 10*mm))
+
+    # Erstellungsdatum
+    erstellt = dt.now().strftime('%d.%m.%Y')
+    elements.append(Paragraph(f"<b>Datum der Belegerstellung:</b> {erstellt}", normal_style))
+    elements.append(Spacer(1, 15*mm))
+
+    # Unterschrift
+    elements.append(Paragraph("<b>Unterschrift des Ausstellers:</b>", label_style))
+    elements.append(Spacer(1, 3*mm))
+    sig_b64 = einstellungen.get('unterschrift_base64')
+    if sig_b64:
+        try:
+            sig_data = base64.b64decode(sig_b64.split(',')[1] if ',' in sig_b64 else sig_b64)
+            sig_img = Image(BytesIO(sig_data), width=50*mm, height=15*mm)
+            elements.append(sig_img)
+        except Exception:
+            elements.append(Spacer(1, 15*mm))
+    else:
+        elements.append(Spacer(1, 15*mm))
+
+    sig_line = Table([['_' * 60]], colWidths=[170*mm])
+    elements.append(sig_line)
+    elements.append(Paragraph(f"Datum, Unterschrift: {aussteller_name}", normal_style))
+    elements.append(Spacer(1, 10*mm))
+
+    elements.append(Paragraph(
+        "<i>Hinweis: Dieser Eigenbeleg dient als Ersatz für einen nicht beschaffbaren Originalbeleg "
+        "gemäß § 158 AO.</i>",
+        footer_style
+    ))
+
+    doc.build(elements)
+    pdf_data = buffer.getvalue()
+    buffer.close()
+    return pdf_data
+
+
+@app.route('/api/transaktionen/<int:id>/eigenbeleg', methods=['POST'])
+def create_eigenbeleg(id):
+    """Generiert Eigenbeleg-PDF und ordnet ihn der Transaktion zu."""
+    data = request.json or {}
+    # begruendung_typ wird vom Frontend gesendet, aktuell nicht persistiert
+    # (nur begruendung_text wird gespeichert)
+    begruendung_text = (data.get('begruendung_text') or '').strip()
+    if not begruendung_text:
+        return jsonify({'error': 'Begründung darf nicht leer sein'}), 400
+
+    conn = get_db()
+
+    # Transaktion + Abrechnung + Konto laden
+    transaktion = conn.execute('''
+        SELECT t.*, a.periode, k.name as konto_name
+        FROM transaktionen t
+        JOIN abrechnungen a ON t.abrechnung_id = a.id
+        JOIN konten k ON a.konto_id = k.id
+        WHERE t.id = ?
+    ''', (id,)).fetchone()
+    if not transaktion:
+        conn.close()
+        return jsonify({'error': 'Transaktion nicht gefunden'}), 404
+
+    # Existierenden Beleg prüfen
+    bestehender_beleg = conn.execute(
+        'SELECT * FROM belege WHERE transaktion_id = ?', (id,)
+    ).fetchone()
+    if bestehender_beleg and bestehender_beleg['match_typ'] != 'eigenbeleg':
+        conn.close()
+        return jsonify({'error': 'Transaktion hat bereits einen Originalbeleg'}), 400
+
+    # Einstellungen (Aussteller-Daten)
+    einstellungen_row = conn.execute('SELECT * FROM einstellungen WHERE id = 1').fetchone()
+    einstellungen = dict(einstellungen_row) if einstellungen_row else {}
+
+    # PDF generieren
+    pdf_bytes = _generate_eigenbeleg_pdf(dict(transaktion), begruendung_text, einstellungen)
+
+    # Speicherort bestimmen
+    archiv_dir = get_archiv_path(transaktion['konto_name'], transaktion['periode'])
+    filename = f"eigenbeleg_{id}.pdf"
+    filepath = os.path.join(archiv_dir, filename)
+
+    # PDF schreiben (überschreibt bei Re-Submit)
+    with open(filepath, 'wb') as f:
+        f.write(pdf_bytes)
+
+    file_hash = hashlib.sha256(pdf_bytes).hexdigest()
+
+    # DB: Insert oder Update — mit retry-Logik gegen "database is locked"
+    try:
+        if bestehender_beleg:
+            db_execute_with_retry(conn, '''
+                UPDATE belege
+                SET datei_name = ?, datei_pfad = ?, file_hash = ?,
+                    match_typ = ?, match_confidence = ?, begruendung = ?
+                WHERE id = ?
+            ''', (filename, filepath, file_hash, 'eigenbeleg', 1.0, begruendung_text,
+                  bestehender_beleg['id']))
+            beleg_id = bestehender_beleg['id']
+        else:
+            cursor = db_execute_with_retry(conn, '''
+                INSERT INTO belege (transaktion_id, datei_name, datei_pfad, file_hash,
+                                    match_typ, match_confidence, begruendung)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (id, filename, filepath, file_hash, 'eigenbeleg', 1.0, begruendung_text))
+            beleg_id = cursor.lastrowid
+
+        # Transaktion auf 'zugeordnet'
+        db_execute_with_retry(conn, "UPDATE transaktionen SET status = 'zugeordnet' WHERE id = ?", (id,))
+        conn.commit()
+    except Exception:
+        # Rollback DB + cleanup orphaned PDF
+        conn.rollback()
+        conn.close()
+        try:
+            os.remove(filepath)
+        except OSError:
+            pass
+        raise
+    conn.close()
+
+    return jsonify({
+        'success': True,
+        'beleg_id': beleg_id,
+        'pdf_pfad': filepath,
+    })
 
 
 # --- Bewirtungsbelege ---

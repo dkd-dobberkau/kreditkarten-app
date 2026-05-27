@@ -714,6 +714,56 @@
                 <div id="manual-beleg-preview" style="display: none;" class="card-panel grey lighten-4">
                 </div>
             </div>
+
+            <!-- Eigenbeleg-Erstellung (sichtbar wenn kein Beleg verlinkt) -->
+            <div id="eigenbeleg-section" style="display: none; margin-top: 20px; border-top: 1px solid #ddd; padding-top: 16px;">
+                <h5>Kein Originalbeleg vorhanden?</h5>
+                <p class="grey-text">Erstellt einen Eigenbeleg gemäß § 158 AO als Ersatz für einen nicht beschaffbaren Originalbeleg.</p>
+
+                <div id="eigenbeleg-form" style="display: none; margin-top: 12px;">
+                    <p><strong>Begründung wählen:</strong></p>
+                    <p>
+                        <label>
+                            <input name="eigenbeleg-grund" type="radio" value="Beleg nicht erhalten" checked />
+                            <span>Beleg nicht erhalten</span>
+                        </label>
+                    </p>
+                    <p>
+                        <label>
+                            <input name="eigenbeleg-grund" type="radio" value="Beleg verloren" />
+                            <span>Beleg verloren</span>
+                        </label>
+                    </p>
+                    <p>
+                        <label>
+                            <input name="eigenbeleg-grund" type="radio" value="Kein Beleg ausgestellt" />
+                            <span>Kein Beleg ausgestellt</span>
+                        </label>
+                    </p>
+                    <p>
+                        <label>
+                            <input name="eigenbeleg-grund" type="radio" value="__sonstiges__" id="eigenbeleg-grund-sonstiges" />
+                            <span>Sonstiges</span>
+                        </label>
+                    </p>
+                    <div class="input-field" id="eigenbeleg-sonstiges-field" style="display: none;">
+                        <input type="text" id="eigenbeleg-sonstiges-text" />
+                        <label for="eigenbeleg-sonstiges-text">Begründung (freier Text)</label>
+                    </div>
+                    <div style="margin-top: 12px;">
+                        <a class="btn waves-effect waves-light" onclick="submitEigenbeleg()">
+                            <i class="material-icons left">description</i>Eigenbeleg erstellen
+                        </a>
+                        <a class="btn-flat waves-effect" onclick="cancelEigenbelegForm()">Abbrechen</a>
+                    </div>
+                </div>
+
+                <div id="eigenbeleg-trigger">
+                    <a class="btn waves-effect waves-light orange" onclick="showEigenbelegForm()">
+                        <i class="material-icons left">description</i>Eigenbeleg erstellen
+                    </a>
+                </div>
+            </div>
         </div>
         <div class="modal-footer">
             <a href="#!" class="modal-close waves-effect btn-flat">Schließen</a>
@@ -1896,7 +1946,7 @@
                             <span class="transaction-amount">${(t.betrag_eur || t.betrag).toFixed(2)} €</span>
                             <span class="transaction-status">
                                 <i class="material-icons tiny ${statusClass}">${statusIcon}</i>
-                                ${t.beleg_datei ? '<i class="material-icons tiny">attachment</i>' : ''}
+                                ${t.beleg_datei ? (t.beleg_match_typ === 'eigenbeleg' ? '<i class="material-icons tiny" title="Eigenbeleg">description</i>' : '<i class="material-icons tiny" title="Beleg zugeordnet">attachment</i>') : ''}
                                 ${showBewirtung ? `<a class="btn-flat btn-small" onclick="event.stopPropagation(); openBewirtungsbeleg(${t.id})" title="Bewirtungsbeleg"><i class="material-icons tiny">receipt_long</i></a>` : ''}
                             </span>
                         </div>`;
@@ -1974,6 +2024,15 @@
             document.getElementById('detail-kategorie').value = t.kategorie || '';
             document.getElementById('detail-status-select').value = t.status || 'offen';
             document.getElementById('detail-notizen').value = t.notizen || '';
+
+            // Eigenbeleg-Sektion: nur sichtbar wenn Transaktion offen und kein Beleg verlinkt
+            const eigenbelegSection = document.getElementById('eigenbeleg-section');
+            if (t.status === 'offen' && !t.beleg_id) {
+                eigenbelegSection.style.display = 'block';
+                resetEigenbelegForm();
+            } else {
+                eigenbelegSection.style.display = 'none';
+            }
 
             M.FormSelect.init(document.querySelectorAll('#transaktion-modal select'));
             M.textareaAutoResize(document.getElementById('detail-notizen'));
@@ -3308,6 +3367,99 @@
             return kat.includes('restaurant') || kat.includes('bewirtung') ||
                    desc.includes('restaurant') || desc.includes('gastst') ||
                    desc.includes('cafe') || desc.includes('bistro');
+        }
+
+        // Eigenbeleg: Formular-State auf Initialzustand setzen
+        function resetEigenbelegForm() {
+            document.getElementById('eigenbeleg-trigger').style.display = 'block';
+            document.getElementById('eigenbeleg-form').style.display = 'none';
+            document.getElementById('eigenbeleg-sonstiges-field').style.display = 'none';
+            document.getElementById('eigenbeleg-sonstiges-text').value = '';
+            const defaultRadio = document.querySelector('input[name="eigenbeleg-grund"][value="Beleg nicht erhalten"]');
+            if (defaultRadio) defaultRadio.checked = true;
+        }
+
+        // Eigenbeleg: Formular zeigen
+        function showEigenbelegForm() {
+            document.getElementById('eigenbeleg-trigger').style.display = 'none';
+            document.getElementById('eigenbeleg-form').style.display = 'block';
+        }
+
+        // Eigenbeleg: Formular abbrechen
+        function cancelEigenbelegForm() {
+            resetEigenbelegForm();
+        }
+
+        // Eigenbeleg: Sonstiges-Toggle
+        document.addEventListener('change', function(e) {
+            if (e.target.name === 'eigenbeleg-grund') {
+                const sonstigesField = document.getElementById('eigenbeleg-sonstiges-field');
+                if (e.target.value === '__sonstiges__') {
+                    sonstigesField.style.display = 'block';
+                } else {
+                    sonstigesField.style.display = 'none';
+                }
+            }
+        });
+
+        // Eigenbeleg: Submit
+        async function submitEigenbeleg() {
+            if (!currentTransaktionId) return;
+            const selected = document.querySelector('input[name="eigenbeleg-grund"]:checked');
+            if (!selected) {
+                M.toast({html: 'Bitte Begründung auswählen', classes: 'red'});
+                return;
+            }
+            const typMap = {
+                'Beleg nicht erhalten': 'beleg_nicht_erhalten',
+                'Beleg verloren': 'beleg_verloren',
+                'Kein Beleg ausgestellt': 'kein_beleg',
+                '__sonstiges__': 'sonstiges',
+            };
+            const begruendung_typ = typMap[selected.value];
+            let begruendung_text;
+            if (selected.value === '__sonstiges__') {
+                begruendung_text = document.getElementById('eigenbeleg-sonstiges-text').value.trim();
+                if (!begruendung_text) {
+                    M.toast({html: 'Bitte Begründungstext eingeben', classes: 'red'});
+                    return;
+                }
+            } else {
+                begruendung_text = selected.value;
+            }
+
+            // Double-submit-Schutz: Buttons sperren während fetch
+            const submitBtn = document.querySelector('#eigenbeleg-form .btn');
+            const cancelBtn = document.querySelector('#eigenbeleg-form .btn-flat');
+            submitBtn.style.pointerEvents = 'none';
+            if (cancelBtn) cancelBtn.style.pointerEvents = 'none';
+
+            try {
+                const response = await fetch(`/api/transaktionen/${currentTransaktionId}/eigenbeleg`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ begruendung_typ, begruendung_text })
+                });
+                const data = await response.json();
+                if (!response.ok) {
+                    M.toast({html: data.error || 'Fehler beim Erstellen', classes: 'red'});
+                    return;
+                }
+                M.toast({html: 'Eigenbeleg erstellt', classes: 'green'});
+                M.Modal.getInstance(document.getElementById('transaktion-modal')).close();
+                // Liste neu laden
+                const abrechnungId = document.getElementById('abrechnung-select').value;
+                if (abrechnungId) {
+                    loadTransaktionen(abrechnungId);
+                    loadAbrechnungBelege();
+                }
+            } catch (err) {
+                M.toast({html: 'Netzwerkfehler', classes: 'red'});
+                console.error(err);
+            } finally {
+                submitBtn.style.pointerEvents = '';
+                if (cancelBtn) cancelBtn.style.pointerEvents = '';
+            }
         }
     </script>
 </body>

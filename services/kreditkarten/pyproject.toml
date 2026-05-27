@@ -23,4 +23,5 @@ dependencies = [
 dev-dependencies = [
     "pytest>=8.0.0",
     "ruff>=0.1.0",
+    "pdfminer.six>=20221105",
 ]
