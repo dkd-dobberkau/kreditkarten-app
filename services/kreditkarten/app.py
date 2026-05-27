@@ -2483,6 +2483,86 @@ def _generate_eigenbeleg_pdf(transaktion: dict, begruendung_text: str, einstellu
     return pdf_data
 
 
+@app.route('/api/transaktionen/<int:id>/eigenbeleg', methods=['POST'])
+def create_eigenbeleg(id):
+    """Generiert Eigenbeleg-PDF und ordnet ihn der Transaktion zu."""
+    import hashlib
+
+    data = request.json or {}
+    begruendung_text = (data.get('begruendung_text') or '').strip()
+    if not begruendung_text:
+        return jsonify({'error': 'Begründung darf nicht leer sein'}), 400
+
+    conn = get_db()
+
+    # Transaktion + Abrechnung + Konto laden
+    transaktion = conn.execute('''
+        SELECT t.*, a.periode, k.name as konto_name
+        FROM transaktionen t
+        JOIN abrechnungen a ON t.abrechnung_id = a.id
+        JOIN konten k ON a.konto_id = k.id
+        WHERE t.id = ?
+    ''', (id,)).fetchone()
+    if not transaktion:
+        conn.close()
+        return jsonify({'error': 'Transaktion nicht gefunden'}), 404
+
+    # Existierenden Beleg prüfen
+    bestehender_beleg = conn.execute(
+        'SELECT * FROM belege WHERE transaktion_id = ?', (id,)
+    ).fetchone()
+    if bestehender_beleg and bestehender_beleg['match_typ'] != 'eigenbeleg':
+        conn.close()
+        return jsonify({'error': 'Transaktion hat bereits einen Originalbeleg'}), 400
+
+    # Einstellungen (Aussteller-Daten)
+    einstellungen_row = conn.execute('SELECT * FROM einstellungen WHERE id = 1').fetchone()
+    einstellungen = dict(einstellungen_row) if einstellungen_row else {}
+
+    # PDF generieren
+    pdf_bytes = _generate_eigenbeleg_pdf(dict(transaktion), begruendung_text, einstellungen)
+
+    # Speicherort bestimmen
+    archiv_dir = get_archiv_path(transaktion['konto_name'], transaktion['periode'])
+    filename = f"eigenbeleg_{id}.pdf"
+    filepath = os.path.join(archiv_dir, filename)
+
+    # PDF schreiben (überschreibt bei Re-Submit)
+    with open(filepath, 'wb') as f:
+        f.write(pdf_bytes)
+
+    file_hash = hashlib.sha256(pdf_bytes).hexdigest()
+
+    # DB: Insert oder Update
+    if bestehender_beleg:
+        conn.execute('''
+            UPDATE belege
+            SET datei_name = ?, datei_pfad = ?, file_hash = ?,
+                match_typ = ?, match_confidence = ?, begruendung = ?
+            WHERE id = ?
+        ''', (filename, filepath, file_hash, 'eigenbeleg', 1.0, begruendung_text,
+              bestehender_beleg['id']))
+        beleg_id = bestehender_beleg['id']
+    else:
+        cursor = conn.execute('''
+            INSERT INTO belege (transaktion_id, datei_name, datei_pfad, file_hash,
+                                match_typ, match_confidence, begruendung)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ''', (id, filename, filepath, file_hash, 'eigenbeleg', 1.0, begruendung_text))
+        beleg_id = cursor.lastrowid
+
+    # Transaktion auf 'zugeordnet'
+    conn.execute("UPDATE transaktionen SET status = 'zugeordnet' WHERE id = ?", (id,))
+    conn.commit()
+    conn.close()
+
+    return jsonify({
+        'success': True,
+        'beleg_id': beleg_id,
+        'pdf_pfad': filepath,
+    })
+
+
 # --- Bewirtungsbelege ---
 
 @app.route('/api/transaktionen/<int:id>/bewirtungsbeleg', methods=['POST'])
