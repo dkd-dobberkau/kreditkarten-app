@@ -61,7 +61,7 @@ Unterschrift: _______________________
               Olivier Dobberkau
 ```
 
-**Aussteller-Daten:** Werden aus der `konten`-Tabelle bzw. einer neuen Konstante gezogen — heute kein Feld für Firmenanschrift vorhanden. Für v1 hartcodiert in einer Modul-Konstante in `eigenbeleg_generator.py`; spätere Auslagerung in `einstellungen`-Tabelle möglich (out of scope).
+**Aussteller-Daten:** Werden aus der existierenden `einstellungen`-Tabelle gezogen (Felder `name`, `firma`, `bewirtender_name`, `unterschrift_base64`). Die Tabelle hat genau eine Zeile (`id=1`). Damit kein Hartcoding und konsistent mit dem Bewirtungsbeleg-Workflow, der dieselbe Quelle nutzt.
 
 **Speicherort:**
 ```
@@ -76,14 +76,16 @@ Damit landet der Eigenbeleg automatisch im normalen Export-ZIP.
 
 ## Backend
 
-### Neues Modul: `parsers/eigenbeleg_generator.py`
+### PDF-Generator-Funktion in `app.py`
 
-(Liegt bei den Parsern weil verwandt mit Beleg-Verarbeitung; alternativ ein eigenes `services/`-Verzeichnis denkbar — heute existiert keins, daher nicht aufmachen.)
+Konsistent mit dem Bewirtungsbeleg-Workflow (`create_bewirtungsbeleg` in app.py ab Zeile ~2336) wird die PDF-Generierung als private Helper-Funktion direkt in `app.py` realisiert:
 
 ```python
-def generate_eigenbeleg_pdf(transaktion: dict, begruendung_text: str, output_path: str) -> bytes:
-    """Generiert Eigenbeleg-PDF, schreibt es nach output_path, gibt PDF-Bytes zurück."""
+def _generate_eigenbeleg_pdf(transaktion: dict, begruendung_text: str, einstellungen: dict) -> bytes:
+    """Generiert Eigenbeleg-PDF-Bytes (in BytesIO). Schreibt nicht auf Platte."""
 ```
+
+Das Schreiben auf Platte und der DB-Insert geschehen im Endpoint, damit der Generator pur und unit-testbar bleibt.
 
 ### Neuer Endpoint
 
@@ -180,6 +182,6 @@ Im Excel-Export bekommen Eigenbelege eine zusätzliche Spalte/Markierung "Eigenb
 
 ## Offene Punkte (für Implementation-Plan)
 
-- Genaue Liste der Aussteller-Daten (heute keine Firmen-Stammdaten in der DB — wird in v1 als Konstante hartcodiert, mit TODO-Kommentar für spätere Einstellungs-Auslagerung).
-- Excel-Export-Anpassung: in v1 enthalten oder out-of-scope?
-- Konto-Bezeichnung-Slug-Funktion: existiert sie im Projekt schon (für die Archiv-Pfade)? Wenn nicht, muss eine kleine Helper-Funktion her.
+- **Aussteller-Daten:** Aus `einstellungen`-Tabelle (siehe oben).
+- **Konto-Bezeichnung-Slug:** Helper-Funktion `get_archiv_path(konto_name, periode)` existiert in `app.py` ab Zeile 154 und wird wiederverwendet.
+- **Excel-Export-Anpassung:** **Out-of-scope für v1.** Eigenbelege erscheinen im ZIP-Export wie normale PDF-Belege (via existierender Logik). Eine extra Spalte/Markierung im Excel-Export wird in einer Folge-Iteration ergänzt.
