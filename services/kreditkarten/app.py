@@ -1136,7 +1136,8 @@ def get_transaktionen():
 
     if abrechnung_id:
         transaktionen = conn.execute('''
-            SELECT t.*, b.id as beleg_id, b.datei_name as beleg_datei
+            SELECT t.*, b.id as beleg_id, b.datei_name as beleg_datei,
+                   b.match_typ as beleg_match_typ, b.begruendung as beleg_begruendung
             FROM transaktionen t
             LEFT JOIN belege b ON t.id = b.transaktion_id
             WHERE t.abrechnung_id = ?
@@ -1144,7 +1145,8 @@ def get_transaktionen():
         ''', (abrechnung_id,)).fetchall()
     else:
         transaktionen = conn.execute('''
-            SELECT t.*, b.id as beleg_id, b.datei_name as beleg_datei
+            SELECT t.*, b.id as beleg_id, b.datei_name as beleg_datei,
+                   b.match_typ as beleg_match_typ, b.begruendung as beleg_begruendung
             FROM transaktionen t
             LEFT JOIN belege b ON t.id = b.transaktion_id
             ORDER BY t.position ASC

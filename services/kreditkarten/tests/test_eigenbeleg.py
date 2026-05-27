@@ -180,3 +180,34 @@ class TestEigenbelegEndpoint:
         assert response.status_code == 400
         data = json.loads(response.data)
         assert 'Originalbeleg' in data['error']
+
+
+class TestTransaktionenApiEigenbelegFelder:
+    """Tests dass die Transaktions-API match_typ und begruendung mitliefert."""
+
+    def test_transaktionen_endpoint_liefert_match_typ_und_begruendung(self, client, sample_transaktion):
+        """Nach Eigenbeleg-Erstellung enthält GET /api/transaktionen die neuen Felder."""
+        # Eigenbeleg erstellen
+        client.post(
+            f'/api/transaktionen/{sample_transaktion}/eigenbeleg',
+            data=json.dumps({
+                'begruendung_typ': 'beleg_verloren',
+                'begruendung_text': 'Beleg verloren',
+            }),
+            content_type='application/json'
+        )
+
+        # Get transaktionen
+        import app as app_module
+        conn = app_module.get_db()
+        abrechnung_id = conn.execute(
+            'SELECT abrechnung_id FROM transaktionen WHERE id = ?', (sample_transaktion,)
+        ).fetchone()['abrechnung_id']
+        conn.close()
+
+        response = client.get(f'/api/transaktionen?abrechnung_id={abrechnung_id}')
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        t = next(x for x in data if x['id'] == sample_transaktion)
+        assert t['beleg_match_typ'] == 'eigenbeleg'
+        assert t['beleg_begruendung'] == 'Beleg verloren'
