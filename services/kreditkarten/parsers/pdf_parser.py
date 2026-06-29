@@ -7,6 +7,8 @@ import re
 import os
 from datetime import datetime
 
+from config import ANTHROPIC_MODEL
+
 # Optional imports
 try:
     from pdf2image import convert_from_path
@@ -140,7 +142,7 @@ Antworte NUR mit JSON:
 }"""
 
         message = client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model=ANTHROPIC_MODEL,
             max_tokens=4096,
             messages=[{
                 "role": "user",

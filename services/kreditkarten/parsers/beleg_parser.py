@@ -8,6 +8,8 @@ import json
 import base64
 from datetime import datetime
 
+from config import ANTHROPIC_MODEL
+
 # Optional imports
 try:
     from PIL import Image
@@ -180,7 +182,7 @@ Falls ein Wert nicht erkennbar ist, setze null."""
         content.append({"type": "text", "text": prompt})
 
         message = client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model=ANTHROPIC_MODEL,
             max_tokens=1024,
             messages=[{"role": "user", "content": content}]
         )

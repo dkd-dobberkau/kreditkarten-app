@@ -19,6 +19,8 @@ import io
 import markdown
 import glob as glob_module
 
+from config import ANTHROPIC_MODEL
+
 load_dotenv()
 
 app = Flask(__name__)
@@ -550,7 +552,7 @@ Antworte NUR mit JSON:
 }}"""
 
         message = client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model=ANTHROPIC_MODEL,
             max_tokens=512,
             messages=[{"role": "user", "content": prompt}]
         )
@@ -607,7 +609,7 @@ Antworte NUR mit einem JSON-Array. Für jede Transaktion (in der gleichen Reihen
 ]"""
 
         message = client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model=ANTHROPIC_MODEL,
             max_tokens=4096,
             messages=[{"role": "user", "content": prompt}]
         )
