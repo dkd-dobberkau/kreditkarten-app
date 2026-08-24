@@ -2549,7 +2549,9 @@ def create_eigenbeleg(id):
 
     # Speicherort bestimmen
     archiv_dir = get_archiv_path(transaktion['konto_name'], transaktion['periode'])
-    filename = f"eigenbeleg_{id}.pdf"
+    # Buchungsdatum voranstellen, damit der Eigenbeleg wie jeder andere Beleg
+    # chronologisch einsortiert (siehe beleg_dateiname)
+    filename = beleg_dateiname(f"eigenbeleg_{id}.pdf", transaktion['datum'])
     filepath = os.path.join(archiv_dir, filename)
 
     # PDF schreiben (überschreibt bei Re-Submit)

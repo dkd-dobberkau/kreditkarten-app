@@ -92,6 +92,18 @@ class TestEigenbelegEndpoint:
         assert t['status'] == 'zugeordnet'
         conn.close()
 
+    def test_dateiname_traegt_das_buchungsdatum(self, client, sample_transaktion):
+        """Wie jeder andere Beleg soll auch der Eigenbeleg chronologisch einsortieren."""
+        response = client.post(
+            f'/api/transaktionen/{sample_transaktion}/eigenbeleg',
+            data=json.dumps({'begruendung_text': 'Beleg nicht erhalten'}),
+            content_type='application/json'
+        )
+
+        assert response.status_code == 200
+        dateiname = os.path.basename(json.loads(response.data)['pdf_pfad'])
+        assert dateiname == f'2026-01-15_eigenbeleg_{sample_transaktion}.pdf'
+
     def test_leere_begruendung_400(self, client, sample_transaktion):
         """Leerer Begründungs-Text → 400."""
         response = client.post(
