@@ -18,6 +18,14 @@ COPY pyproject.toml uv.lock* ./
 # Install dependencies to system Python
 RUN uv pip install --system --no-cache -r pyproject.toml
 
+# Dev-Abhängigkeiten (pytest, ruff, pdfminer.six) nur für Entwicklungs-Images.
+# DDEV setzt INSTALL_DEV=true, damit `ddev exec -s kreditkarten pytest` läuft;
+# ein Produktions-Build bleibt ohne Test-Werkzeuge.
+ARG INSTALL_DEV=false
+RUN if [ "$INSTALL_DEV" = "true" ]; then \
+        uv pip install --system --no-cache --group dev; \
+    fi
+
 # Production Image
 FROM python:3.11-slim
 

@@ -3,6 +3,8 @@ services:
     build:
       context: ../services/kreditkarten
       dockerfile: Dockerfile
+      args:
+        INSTALL_DEV: "true"
     container_name: ddev-${DDEV_SITENAME}-kreditkarten
     labels:
       com.ddev.site-name: ${DDEV_SITENAME}
