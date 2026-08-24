@@ -167,6 +167,37 @@ def get_archiv_path(konto_name, periode):
     return archiv_path
 
 
+def beleg_dateiname(aktueller_name, beleg_datum):
+    """Stellt einer Belegdatei ihr Rechnungsdatum voran (YYYY-MM-DD).
+
+    Dadurch sortieren Inbox und Archiv chronologisch. Eine eventuell vorhandene
+    Positionsnummer aus früheren Zuordnungen wird entfernt - sie ist nur innerhalb
+    einer Abrechnung aussagekräftig. Ist bereits das richtige Datum vorangestellt,
+    bleibt der Name unverändert, damit wiederholtes Zuordnen ihn nicht aufbläht.
+
+    Args:
+        aktueller_name: bisheriger Dateiname
+        beleg_datum: Rechnungsdatum aus der Extraktion (TT.MM.JJJJ oder JJJJ-MM-TT)
+
+    Returns:
+        Zielname; ohne verwertbares Datum ohne jedes Präfix.
+    """
+    basis = re.sub(r'^\d{2}_', '', aktueller_name or '')
+
+    datum = None
+    for fmt in ('%d.%m.%Y', '%Y-%m-%d', '%d.%m.%y'):
+        try:
+            datum = datetime.strptime((beleg_datum or '').strip(), fmt).strftime('%Y-%m-%d')
+            break
+        except (ValueError, AttributeError):
+            continue
+
+    if not datum:
+        return basis
+
+    return basis if basis.startswith(datum) else f'{datum}_{basis}'
+
+
 def archive_beleg(beleg_pfad, konto_name, periode):
     """
     Verschiebt einen Beleg ins Archiv-Verzeichnis.
@@ -1697,7 +1728,6 @@ def scan_belege_folder():
 @app.route('/api/belege/<int:id>/zuordnen', methods=['POST'])
 def zuordne_beleg(id):
     """Assign or unassign a receipt to/from a transaction."""
-    import re as regex
 
     transaktion_id = request.json.get('transaktion_id')
     match_typ = request.json.get('match_typ', 'manuell')
@@ -1717,37 +1747,32 @@ def zuordne_beleg(id):
     new_filename = beleg['datei_name']
     new_filepath = beleg['datei_pfad']
 
-    # Rename file with position prefix when assigning
+    # Datei nach Rechnungsdatum benennen, damit der Ordner chronologisch sortiert
     if transaktion_id:
-        # Get transaction position
-        transaktion = conn.execute(
-            'SELECT position FROM transaktionen WHERE id = ?', (transaktion_id,)
-        ).fetchone()
+        old_filename = beleg['datei_name']
+        old_filepath = beleg['datei_pfad']
 
-        if transaktion and transaktion['position']:
-            position = transaktion['position']
-            old_filename = beleg['datei_name']
-            old_filepath = beleg['datei_pfad']
+        try:
+            extrahiert = json.loads(beleg['extrahierte_daten'] or '{}')
+        except json.JSONDecodeError:
+            extrahiert = {}
 
-            # Remove existing prefix (e.g., "01_" or "99_")
-            base_name = regex.sub(r'^\d{2}_', '', old_filename)
+        new_filename = beleg_dateiname(old_filename, extrahiert.get('datum'))
+        new_filepath = os.path.join(os.path.dirname(old_filepath), new_filename) \
+            if old_filepath else old_filepath
 
-            # Add new prefix
-            new_filename = f"{position:02d}_{base_name}"
-            new_filepath = os.path.join(os.path.dirname(old_filepath), new_filename)
+        # Rename file if it exists and name changed
+        if old_filepath and old_filepath != new_filepath and os.path.exists(old_filepath):
+            # Handle potential conflicts
+            if os.path.exists(new_filepath):
+                base, ext = os.path.splitext(new_filename)
+                counter = 1
+                while os.path.exists(new_filepath):
+                    new_filename = f"{base}_{counter}{ext}"
+                    new_filepath = os.path.join(os.path.dirname(old_filepath), new_filename)
+                    counter += 1
 
-            # Rename file if it exists and name changed
-            if old_filepath != new_filepath and os.path.exists(old_filepath):
-                # Handle potential conflicts
-                if os.path.exists(new_filepath):
-                    base, ext = os.path.splitext(new_filename)
-                    counter = 1
-                    while os.path.exists(new_filepath):
-                        new_filename = f"{base}_{counter}{ext}"
-                        new_filepath = os.path.join(os.path.dirname(old_filepath), new_filename)
-                        counter += 1
-
-                os.rename(old_filepath, new_filepath)
+            os.rename(old_filepath, new_filepath)
 
     # Update receipt assignment and file info
     conn.execute('''
@@ -1906,13 +1931,9 @@ def auto_match_belege():
             new_filename = old_filename
             new_filepath = old_filepath
 
-            # Rename file with position prefix
-            position = best_match.get('position')
-            if position and old_filepath:
-                import re as regex
-                # Remove existing position prefix (e.g., "01_")
-                base_name = regex.sub(r'^\d{2}_', '', old_filename)
-                new_filename = f"{position:02d}_{base_name}"
+            # Datei nach Rechnungsdatum benennen (siehe beleg_dateiname)
+            if old_filepath:
+                new_filename = beleg_dateiname(old_filename, beleg.get('datum'))
                 new_filepath = os.path.join(os.path.dirname(old_filepath), new_filename)
 
                 # Rename file if it exists
