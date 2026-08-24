@@ -1718,9 +1718,13 @@
             document.getElementById('mini-haendler').innerHTML = haendlerHtml || '<span class="grey-text">Keine Daten</span>';
 
             // 3. Receipt status
-            const mitBeleg = transaktionen.filter(t => t.status === 'zugeordnet').length;
-            const ohneBeleg = transaktionen.filter(t => t.status === 'offen').length;
+            // Über den Beleg zählen, nicht über den Status: der Status ist nur eine
+            // Markierung und kann auf 'zugeordnet' stehen, ohne dass ein Beleg existiert.
+            // Gleiche Definition wie statistik.offen der API, damit Karte und Kachel
+            // nicht auseinanderlaufen.
+            const mitBeleg = transaktionen.filter(t => t.beleg_id).length;
             const ignoriert = transaktionen.filter(t => t.status === 'ignoriert').length;
+            const ohneBeleg = transaktionen.filter(t => !t.beleg_id && t.status !== 'ignoriert').length;
 
             const statusHtml = `
                 <div style="display: flex; justify-content: space-between; margin: 4px 0;">
