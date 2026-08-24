@@ -7,6 +7,47 @@ from difflib import SequenceMatcher
 import re
 
 
+# Plausible Bandbreite des impliziten Umrechnungskurses (EUR je Fremdwährungseinheit).
+# Wird geprüft, wenn eine EUR-Transaktion gegen einen Fremdwährungs-Beleg gematcht wird:
+# der Kartenanbieter rechnet um, deshalb sind die Zahlenwerte nie gleich.
+# Die Bandbreiten sind bewusst großzügig - sie sollen Kursschwankungen abdecken, aber
+# größenordnungsmäßige Fehlzuordnungen (Faktor 2 und mehr) ausschließen.
+WECHSELKURS_BANDBREITEN = {
+    'USD': (0.70, 1.10),
+    'GBP': (1.00, 1.35),
+    'CHF': (0.85, 1.20),
+    'CAD': (0.55, 0.80),
+    'AUD': (0.50, 0.75),
+    'DKK': (0.11, 0.16),
+    'SEK': (0.07, 0.12),
+    'NOK': (0.07, 0.12),
+    'PLN': (0.18, 0.28),
+    'CZK': (0.03, 0.05),
+    'JPY': (0.004, 0.010),
+}
+
+# Für nicht hinterlegte Währungen: nur grobe Ausreißer ausschließen, damit
+# eine unbekannte Währung nicht pauschal jedes Matching blockiert.
+WECHSELKURS_STANDARD_BANDBREITE = (0.05, 5.0)
+
+
+def ist_kurs_plausibel(eur_betrag, fremdwaehrungs_betrag, waehrung):
+    """Prüft, ob der implizite Umrechnungskurs für die Währung realistisch ist.
+
+    Ohne diese Prüfung ist der Betrag bei Währungsdifferenz wertlos für das
+    Matching, und bei wiederkehrenden Händlern (gleicher Name, gleiches Datum)
+    entscheidet dann der Zufall - genau so entstehen Fehlzuordnungen.
+    """
+    if not eur_betrag or not fremdwaehrungs_betrag:
+        return None
+
+    kurs = eur_betrag / fremdwaehrungs_betrag
+    unten, oben = WECHSELKURS_BANDBREITEN.get(
+        (waehrung or '').upper(), WECHSELKURS_STANDARD_BANDBREITE
+    )
+    return unten <= kurs <= oben
+
+
 def normalize_haendler(name):
     """Normalisiert einen Händlernamen für Vergleiche."""
     if not name:
@@ -88,14 +129,21 @@ def calculate_match_score(transaktion, beleg):
     t_waehrung = (transaktion.get('waehrung') or 'EUR').upper()
     b_waehrung = (beleg.get('waehrung') or 'EUR').upper()
 
+    # transaktionen.waehrung bezeichnet die Einkaufswährung, belastet wird aber in EUR.
+    # Ist betrag_eur gesetzt, ist der Vergleichsbetrag also EUR - unabhängig davon,
+    # worin eingekauft wurde. Ohne betrag_eur bleibt es beim Betrag in Einkaufswährung.
+    t_vergleichswaehrung = 'EUR' if transaktion.get('betrag_eur') is not None else t_waehrung
+
     # Fremdwährungs-Transaktion mit gleichem Währungs-Beleg
-    # (z.B. Transaktion in USD-Rechnung, Beleg in USD)
-    is_foreign_currency_match = (t_waehrung != 'EUR' and t_waehrung == b_waehrung)
+    # (z.B. Transaktion in USD, Beleg in USD)
+    is_foreign_currency_match = (
+        t_vergleichswaehrung != 'EUR' and t_vergleichswaehrung == b_waehrung
+    )
 
     # Transaktion in EUR aber Beleg in Fremdwährung (oder umgekehrt)
-    is_currency_mismatch = (t_waehrung != b_waehrung)
+    is_currency_mismatch = (t_vergleichswaehrung != b_waehrung)
 
-    if is_currency_mismatch and t_waehrung != 'EUR' and b_waehrung != 'EUR':
+    if is_currency_mismatch and t_vergleichswaehrung != 'EUR' and b_waehrung != 'EUR':
         # Beide Fremdwährungen aber unterschiedlich - kein Match möglich
         details['waehrung_mismatch'] = True
         return 0.0, details
@@ -110,11 +158,30 @@ def calculate_match_score(transaktion, beleg):
         betrag_weight = 0.2
         haendler_weight = 0.5
     elif is_currency_mismatch:
-        # EUR-Transaktion vs Fremdwährungs-Beleg: Betrag-Vergleich macht keinen Sinn
-        # Gib kleinen Bonus wenn Händler matcht, aber Betrag ignorieren
-        betrag_weight = 0.0
+        # EUR-Transaktion vs Fremdwährungs-Beleg: der direkte Betragsvergleich
+        # scheitert am Wechselkurs, aber der implizite Kurs muss plausibel sein.
+        betrag_weight = 0.2
         haendler_weight = 0.5
         details['waehrung_mismatch'] = True
+
+        transaktion_ist_eur = t_vergleichswaehrung == 'EUR'
+        fremdwaehrung = b_waehrung if transaktion_ist_eur else t_vergleichswaehrung
+        eur_betrag = t_betrag if transaktion_ist_eur else b_betrag
+        fremd_betrag = b_betrag if transaktion_ist_eur else t_betrag
+        plausibel = ist_kurs_plausibel(eur_betrag, fremd_betrag, fremdwaehrung)
+
+        if plausibel is False:
+            # Die Beträge können denselben Vorgang nicht abbilden.
+            details['kurs_unplausibel'] = True
+            return 0.0, details
+
+        if plausibel is True:
+            details['kurs_unplausibel'] = False
+            details['betrag_match'] = True
+            score += betrag_weight
+
+        # Betrag ist hier abschließend bewertet - kein zweiter Durchlauf unten.
+        betrag_weight = 0.0
     else:
         # Beide EUR: normales Matching
         betrag_weight = 0.5
