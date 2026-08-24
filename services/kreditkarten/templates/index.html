@@ -1575,6 +1575,20 @@
             return dateStr;
         }
 
+        // Liefert zu TT.MM.JJJJ oder JJJJ-MM-TT einen sortierbaren Schlüssel (JJJJ-MM-TT).
+        // Ohne verwertbares Datum ans Listenende sortieren.
+        function datumSortierschluessel(dateStr) {
+            if (!dateStr) return '9999-99-99';
+            if (dateStr.includes('.')) {
+                const [tag, monat, jahr] = dateStr.split('.');
+                if (tag && monat && jahr) {
+                    return `${jahr}-${monat.padStart(2, '0')}-${tag.padStart(2, '0')}`;
+                }
+                return '9999-99-99';
+            }
+            return dateStr;
+        }
+
         // =============================================================================
         // End Belege Functions
         // =============================================================================
@@ -1847,10 +1861,11 @@
             card.style.display = 'block';
             countBadge.textContent = inboxBelege.length;
 
-            // Sort by extracted date
+            // Nach Datum sortieren - über den Sortierschlüssel, weil ein
+            // Textvergleich von TT.MM.JJJJ nach Tag statt nach Jahr sortiert
             inboxBelege.sort((a, b) => {
-                const dA = a.extracted_datum || a.display_datum || '';
-                const dB = b.extracted_datum || b.display_datum || '';
+                const dA = datumSortierschluessel(a.extracted_datum || a.display_datum);
+                const dB = datumSortierschluessel(b.extracted_datum || b.display_datum);
                 return dA.localeCompare(dB);
             });
 

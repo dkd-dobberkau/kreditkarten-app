@@ -51,3 +51,6 @@ imports/inbox/*.pdf
 
 # Logs
 *.log
+
+# Playwright MCP (temporäre Snapshots und Logs)
+.playwright-mcp/
