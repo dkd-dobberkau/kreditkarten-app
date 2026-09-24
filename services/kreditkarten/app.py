@@ -198,6 +198,27 @@ def beleg_dateiname(aktueller_name, beleg_datum):
     return basis if basis.startswith(datum) else f'{datum}_{basis}'
 
 
+def beleg_spalte(datei_name, anzahl):
+    """Formatiert die Belegspalte der Export-Reports.
+
+    Hängen mehrere Belege an einer Buchung (Rechnung + Zahlungsbestätigung),
+    passt nur der erste Dateiname in die Tabellenspalte - die weiteren werden
+    als Zähler angehängt, damit der Report die Belegzahl nicht verschweigt.
+
+    Args:
+        datei_name: Dateiname des ersten Belegs oder None
+        anzahl: Anzahl der Belege an dieser Buchung
+
+    Returns:
+        Anzeigetext für die Belegspalte, '-' ohne Beleg.
+    """
+    if not datei_name:
+        return '-'
+
+    text = datei_name if len(datei_name) <= 60 else datei_name[:57] + '...'
+    return f'{text} (+{anzahl - 1})' if anzahl and anzahl > 1 else text
+
+
 def archive_beleg(beleg_pfad, konto_name, periode):
     """
     Verschiebt einen Beleg ins Archiv-Verzeichnis.
@@ -892,17 +913,24 @@ def get_abrechnung(id):
         conn.close()
         return jsonify({'error': 'Abrechnung nicht gefunden'}), 404
 
-    # Statistics - use actual beleg assignment, not status field
+    # Statistics - use actual beleg assignment, not status field.
+    # Belege werden per EXISTS geprüft, nicht per JOIN: bei zwei Belegen an einer
+    # Buchung (Rechnung + Zahlungsbestätigung) würde der JOIN die Buchungszeile
+    # verdoppeln und Summe wie Anzahl aufblähen.
     stats = conn.execute('''
         SELECT
             COUNT(*) as total,
-            SUM(CASE WHEN b.id IS NOT NULL OR t.status = 'zugeordnet' THEN 1 ELSE 0 END) as zugeordnet,
-            SUM(CASE WHEN b.id IS NULL AND t.status != 'ignoriert' THEN 1 ELSE 0 END) as offen,
+            SUM(CASE WHEN hat_beleg OR t.status = 'zugeordnet' THEN 1 ELSE 0 END) as zugeordnet,
+            SUM(CASE WHEN NOT hat_beleg AND t.status != 'ignoriert' THEN 1 ELSE 0 END) as offen,
             SUM(CASE WHEN t.status = 'ignoriert' THEN 1 ELSE 0 END) as ignoriert,
             SUM(t.betrag_eur) as summe
-        FROM transaktionen t
-        LEFT JOIN belege b ON t.id = b.transaktion_id
-        WHERE t.abrechnung_id = ?
+        FROM (
+            SELECT t.*, EXISTS(
+                SELECT 1 FROM belege b WHERE b.transaktion_id = t.id
+            ) as hat_beleg
+            FROM transaktionen t
+            WHERE t.abrechnung_id = ?
+        ) t
     ''', (id,)).fetchone()
 
     conn.close()
@@ -1167,21 +1195,27 @@ def get_transaktionen():
     abrechnung_id = request.args.get('abrechnung_id')
     conn = get_db()
 
-    if abrechnung_id:
-        transaktionen = conn.execute('''
-            SELECT t.*, b.id as beleg_id, b.datei_name as beleg_datei,
-                   b.match_typ as beleg_match_typ, b.begruendung as beleg_begruendung
+    # GROUP BY t.id, damit eine Buchung mit mehreren Belegen (Rechnung +
+    # Zahlungsbestätigung) nur eine Zeile liefert. MIN(b.id) wählt den ersten
+    # Beleg; die unaggregierten b.*-Spalten stammen laut SQLite-Semantik aus
+    # genau dieser Zeile. beleg_anzahl macht weitere Belege sichtbar.
+    beleg_felder = '''
+            SELECT t.*, MIN(b.id) as beleg_id, b.datei_name as beleg_datei,
+                   b.match_typ as beleg_match_typ, b.begruendung as beleg_begruendung,
+                   COUNT(b.id) as beleg_anzahl
             FROM transaktionen t
             LEFT JOIN belege b ON t.id = b.transaktion_id
+    '''
+
+    if abrechnung_id:
+        transaktionen = conn.execute(beleg_felder + '''
             WHERE t.abrechnung_id = ?
+            GROUP BY t.id
             ORDER BY t.position ASC
         ''', (abrechnung_id,)).fetchall()
     else:
-        transaktionen = conn.execute('''
-            SELECT t.*, b.id as beleg_id, b.datei_name as beleg_datei,
-                   b.match_typ as beleg_match_typ, b.begruendung as beleg_begruendung
-            FROM transaktionen t
-            LEFT JOIN belege b ON t.id = b.transaktion_id
+        transaktionen = conn.execute(beleg_felder + '''
+            GROUP BY t.id
             ORDER BY t.position ASC
             LIMIT 100
         ''').fetchall()
@@ -2029,12 +2063,15 @@ def export_abrechnung(id):
         conn.close()
         return jsonify({'error': 'Abrechnung nicht gefunden'}), 404
 
-    # Get transactions with beleg info
+    # Get transactions with beleg info (GROUP BY: eine Zeile pro Buchung,
+    # auch wenn zwei Belege an ihr hängen - siehe get_transaktionen)
     transaktionen = conn.execute('''
-        SELECT t.*, b.datei_name as beleg_datei
+        SELECT t.*, MIN(b.id) as beleg_id, b.datei_name as beleg_datei,
+               COUNT(b.id) as beleg_anzahl
         FROM transaktionen t
         LEFT JOIN belege b ON t.id = b.transaktion_id
         WHERE t.abrechnung_id = ?
+        GROUP BY t.id
         ORDER BY t.position ASC
     ''', (id,)).fetchall()
 
@@ -2088,9 +2125,7 @@ def export_abrechnung(id):
         betrag = t['betrag_eur'] or t['betrag'] or 0
         betrag_str = f"{betrag:,.2f} €".replace(',', 'X').replace('.', ',').replace('X', '.')
 
-        beleg = t['beleg_datei'] or '-'
-        if beleg != '-' and len(beleg) > 60:
-            beleg = beleg[:57] + '...'
+        beleg = beleg_spalte(t['beleg_datei'], t['beleg_anzahl'])
 
         table_data.append([
             f"{pos:02d}" if isinstance(pos, int) else pos,
@@ -2182,13 +2217,25 @@ def export_abrechnung_zip(id):
         conn.close()
         return jsonify({'error': 'Abrechnung nicht gefunden'}), 404
 
-    # Get transactions with beleg info
+    # Get transactions with beleg info (eine Zeile pro Buchung für den Report)
     transaktionen = conn.execute('''
-        SELECT t.*, b.datei_name as beleg_datei, b.datei_pfad as beleg_pfad
+        SELECT t.*, MIN(b.id) as beleg_id, b.datei_name as beleg_datei,
+               COUNT(b.id) as beleg_anzahl
         FROM transaktionen t
         LEFT JOIN belege b ON t.id = b.transaktion_id
         WHERE t.abrechnung_id = ?
+        GROUP BY t.id
         ORDER BY t.position ASC
+    ''', (id,)).fetchall()
+
+    # Belegdateien einzeln - hier zählt jeder Beleg, damit auch die
+    # Zahlungsbestätigung zusätzlich zur Rechnung im ZIP landet
+    belegdateien = conn.execute('''
+        SELECT b.datei_name, b.datei_pfad
+        FROM belege b
+        JOIN transaktionen t ON t.id = b.transaktion_id
+        WHERE t.abrechnung_id = ?
+        ORDER BY t.position ASC, b.id ASC
     ''', (id,)).fetchall()
 
     # Get Bewirtungsbelege for this statement
@@ -2223,10 +2270,10 @@ def export_abrechnung_zip(id):
             add_file_utf8(zf, abrechnung['datei_pfad'], f"{base_name}/00_Abrechnung_{periode_clean}.pdf")
 
         # 2. Add all receipts
-        for t in transaktionen:
-            if t['beleg_pfad'] and os.path.exists(t['beleg_pfad']):
+        for beleg in belegdateien:
+            if beleg['datei_pfad'] and os.path.exists(beleg['datei_pfad']):
                 # Use the already renamed filename (with position prefix)
-                add_file_utf8(zf, t['beleg_pfad'], f"{base_name}/Belege/{t['beleg_datei']}")
+                add_file_utf8(zf, beleg['datei_pfad'], f"{base_name}/Belege/{beleg['datei_name']}")
 
         # 3. Add all Bewirtungsbelege
         for bw in bewirtungsbelege:
@@ -2273,9 +2320,7 @@ def export_abrechnung_zip(id):
             betrag = t['betrag_eur'] or t['betrag'] or 0
             betrag_str = f"{betrag:,.2f} €".replace(',', 'X').replace('.', ',').replace('X', '.')
 
-            beleg = t['beleg_datei'] or '-'
-            if beleg != '-' and len(beleg) > 60:
-                beleg = beleg[:57] + '...'
+            beleg = beleg_spalte(t['beleg_datei'], t['beleg_anzahl'])
 
             table_data.append([
                 f"{pos:02d}" if isinstance(pos, int) else pos,
