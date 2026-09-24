@@ -6,6 +6,8 @@
 - [ ] **Bewirtungsbeleg bearbeiten** - Bestehende Belege nachträglich ändern/löschen
 - [ ] **Transaktions-Suche** - Volltextsuche über alle Transaktionen
 - [ ] **Backup/Restore** - Datenbank-Export/Import für Datensicherung
+- [ ] **Auto-Match: Betrag als Mindestkriterium** - Datum (0,3) + Händler (0,2) erreichen die Schwelle von 0,5, auch wenn der Betrag nicht passt. September 2026: eine BMW-Charging-Rechnung über 10,98 € wurde zweimal automatisch einer Buchung über 29,38 € zugeordnet. Zuordnen nur bei übereinstimmendem Betrag oder erklärbarer Fremdwährungsabweichung.
+- [ ] **Sammelrechnungen: Betrag der Einzelrechnung extrahieren** - Bei mehrseitigen PDFs mit vorangestellter Rechnungsübersicht liest die Extraktion die Gesamtsumme statt des Einzelbetrags (BMW Charging 08/2026: 108,33 € statt 78,95 € bzw. 29,38 €) und nimmt die Zahlungsreferenz als Rechnungsnummer.
 
 ## Mittlere Priorität
 
