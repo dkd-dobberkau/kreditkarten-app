@@ -296,6 +296,18 @@ def calculate_match_score(transaktion, beleg):
     return min(score, 1.0), details
 
 
+def ist_auto_zuordenbar(details):
+    """Prüft, ob ein Treffer ohne Rückfrage zugeordnet werden darf.
+
+    Datum (0,3) und Händler (0,2) erreichen die Schwelle von 0,5 auch ohne
+    passenden Betrag. Bei wiederkehrenden Händlern landet dann eine Rechnung
+    über einen anderen Betrag automatisch auf der falschen Buchung. Deshalb
+    muss der Betrag stimmen - exakt oder über einen plausiblen Wechselkurs.
+    Vorschläge für die manuelle Zuordnung bleiben davon unberührt.
+    """
+    return details.get('betrag_match') is True
+
+
 def find_matches(transaktion, belege, threshold=0.5):
     """
     Findet passende Belege für eine Transaktion.
@@ -350,7 +362,10 @@ def auto_match_all(transaktionen, belege, threshold=0.7):
 
     for transaktion in transaktionen:
         t_id = transaktion.get('id')
-        matches = find_matches(transaktion, belege, threshold)
+        matches = [
+            m for m in find_matches(transaktion, belege, threshold)
+            if ist_auto_zuordenbar(m['match_details'])
+        ]
 
         if not matches:
             result['unmatched_transaktionen'].append(t_id)

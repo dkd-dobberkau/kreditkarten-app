@@ -5,7 +5,7 @@ Schwerpunkt: Plausibilitätsprüfung des impliziten Wechselkurses, wenn eine
 EUR-Buchung gegen einen Beleg in Fremdwährung gematcht wird.
 """
 
-from matching import calculate_match_score
+from matching import auto_match_all, calculate_match_score, ist_auto_zuordenbar
 
 
 def transaktion(betrag, waehrung='EUR', datum='2026-08-14', haendler='Cloud-Anbieter',
@@ -175,3 +175,70 @@ class TestBestehendesVerhalten:
 
         assert score >= 0.0
         assert details['betrag_match'] is False
+
+
+class TestBetragAlsPflichtFuerAutoZuordnung:
+    """Datum und Händler allein erreichen die Schwelle - der Betrag muss passen.
+
+    Ohne diese Pflicht landet bei wiederkehrenden Händlern eine Rechnung über
+    einen Teilbetrag automatisch auf der falschen Buchung.
+    """
+
+    def test_abweichender_eur_betrag_ist_nicht_auto_zuordenbar(self):
+        """Gleicher Händler, gleiches Datum, aber 40,00 € gegen 12,50 €."""
+        score, details = calculate_match_score(
+            transaktion(40.00, haendler='Ladestromanbieter'),
+            beleg(12.50, waehrung='EUR', haendler='Ladestromanbieter GmbH'),
+        )
+
+        assert score >= 0.5, 'Vorbedingung: Datum und Händler allein erreichen die Schwelle'
+        assert ist_auto_zuordenbar(details) is False
+
+    def test_teilbetrag_aus_dem_belegtext_reicht_nicht(self):
+        """Ein Belegtext mit passenden Wörtern ersetzt keinen passenden Betrag."""
+        rechnung = beleg(3.20, waehrung='EUR', haendler='Paketdienst Berlin GmbH')
+        rechnung['ocr_text'] = 'Paketdienst Berlin Zwischensumme 3,20 Seite 1 von 2'
+        buchung = transaktion(95.40, haendler='Paketdienst')
+        buchung['beschreibung'] = 'PAKETDIENST BERLIN'
+
+        _, details = calculate_match_score(buchung, rechnung)
+
+        assert ist_auto_zuordenbar(details) is False
+
+    def test_exakter_eur_betrag_ist_auto_zuordenbar(self):
+        _, details = calculate_match_score(
+            transaktion(40.00, haendler='Ladestromanbieter'),
+            beleg(40.00, waehrung='EUR', haendler='Ladestromanbieter GmbH'),
+        )
+
+        assert ist_auto_zuordenbar(details) is True
+
+    def test_plausibler_wechselkurs_ist_auto_zuordenbar(self):
+        _, details = calculate_match_score(transaktion(800.00), beleg(900.00))
+
+        assert ist_auto_zuordenbar(details) is True
+
+    def test_auto_match_all_ordnet_abweichenden_betrag_nicht_zu(self):
+        buchung = transaktion(40.00, haendler='Ladestromanbieter')
+        buchung['id'] = 1
+        rechnung = beleg(12.50, waehrung='EUR', haendler='Ladestromanbieter GmbH')
+        rechnung['id'] = 10
+
+        ergebnis = auto_match_all([buchung], [rechnung], threshold=0.5)
+
+        assert ergebnis['matched'] == []
+        assert ergebnis['unmatched_transaktionen'] == [1]
+
+    def test_auto_match_all_bevorzugt_passenden_betrag(self):
+        """Zwei Belege desselben Händlers: nur der mit passendem Betrag wird zugeordnet."""
+        buchung = transaktion(40.00, haendler='Ladestromanbieter')
+        buchung['id'] = 1
+        falsch = beleg(12.50, waehrung='EUR', haendler='Ladestromanbieter GmbH')
+        falsch['id'] = 10
+        richtig = beleg(40.00, waehrung='EUR', datum='16.08.2026',
+                        haendler='Ladestromanbieter GmbH')
+        richtig['id'] = 11
+
+        ergebnis = auto_match_all([buchung], [falsch, richtig], threshold=0.5)
+
+        assert [(t, b) for t, b, _ in ergebnis['matched']] == [(1, 11)]

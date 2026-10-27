@@ -1889,7 +1889,7 @@ def re_extract_belege():
 @app.route('/api/belege/auto-match', methods=['POST'])
 def auto_match_belege():
     """Automatically match receipts to transactions."""
-    from matching import calculate_match_score
+    from matching import calculate_match_score, ist_auto_zuordenbar
 
     abrechnung_id = request.json.get('abrechnung_id')
     threshold = request.json.get('threshold', 0.5)
@@ -1948,6 +1948,10 @@ def auto_match_belege():
 
             # Calculate match score
             score, details = calculate_match_score(t, beleg)
+
+            # Ohne passenden Betrag nur manuell zuordnen
+            if not ist_auto_zuordenbar(details):
+                continue
 
             if score > best_score:
                 best_score = score
